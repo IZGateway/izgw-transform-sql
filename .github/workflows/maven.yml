@@ -16,6 +16,10 @@ on:
 
 concurrency: izgw-transform-sql-dev
 
+permissions:
+  contents: write
+  packages: write
+
 jobs:
   build:
 
@@ -25,8 +29,6 @@ jobs:
 
     - name: Checkout the software
       uses: actions/checkout@v6
-      with:
-        ssh-key: ${{secrets.ACTIONS_KEY}}
 
     - name: Set up JDK 21
       uses: actions/setup-java@v5
@@ -125,7 +127,6 @@ jobs:
       run: |
         mvn -B -U clean package deploy \
             -Dbuildno=${{github.run_number}} \
-            -DdoRevisionCheck=${{env.DO_REVISION_CHECK}} \
             -DskipDependencyCheck=${{env.SKIP_DEPENDENCY_CHECK}}
 
     - name: Upload build environment on failure
