@@ -1,0 +1,143 @@
+name: Java CI with Maven
+
+on:
+  push:
+    branches:
+      - develop
+
+  pull_request:
+    branches:
+      - develop
+
+  schedule:
+    - cron: '0 6 * * 1-5'
+
+  workflow_dispatch:
+
+concurrency: izgw-transform-sql-dev
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+    - name: Checkout the software
+      uses: actions/checkout@v6
+      with:
+        ssh-key: ${{secrets.ACTIONS_KEY}}
+
+    - name: Set up JDK 21
+      uses: actions/setup-java@v5
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+        cache: maven
+
+    - name: Set up Maven
+      uses: stCarolas/setup-maven@v5.1
+      with:
+        maven-version: 3.9.0
+
+    - name: Set up Toolchain
+      shell: bash
+      run: |
+          mkdir -p ~/.m2 \
+          && cat << EOF > ~/.m2/toolchains.xml
+          <?xml version="1.0" encoding="UTF8"?>
+          <toolchains>
+            <toolchain>
+              <type>jdk</type>
+                <provides>
+                  <version>21</version>
+                  <vendor>sun</vendor>
+                </provides>
+                <configuration>
+                  <jdkHome>$JAVA_HOME_21_X64</jdkHome>
+                </configuration>
+            </toolchain>
+          </toolchains>
+          EOF
+
+          cat << EOF > ~/.m2/settings.xml
+          <?xml version="1.0" encoding="UTF-8"?>
+          <settings>
+            <servers>
+              <server>
+                <id>github</id>
+                <username>${{github.actor}}</username>
+                <password>${{ secrets.GITHUB_TOKEN }}</password>
+              </server>
+              <server>
+                <id>github-bom</id>
+                <username>${{github.actor}}</username>
+                <password>${{ secrets.GITHUB_TOKEN }}</password>
+              </server>
+              <server>
+                <id>github-core</id>
+                <username>${{github.actor}}</username>
+                <password>${{ secrets.GITHUB_TOKEN }}</password>
+              </server>
+            </servers>
+          </settings>
+          EOF
+
+          echo BASE_TAG=`mvn help:evaluate -Dexpression=project.version -q -DforceStdout` >> $GITHUB_ENV
+          echo COMPUTERNAME=`hostname` >> $GITHUB_ENV
+
+    - name: Sets env vars for push or pull request to develop
+      run: |
+        echo IMAGE_TAG=`mvn help:evaluate -Dexpression=project.version -q -DforceStdout | sed "s/-SNAPSHOT$/-SNAPSHOT-${{github.run_number}}/"` >> $GITHUB_ENV
+        echo DO_REVISION_CHECK=true >> $GITHUB_ENV
+        echo SKIP_DEPENDENCY_CHECK=true >> $GITHUB_ENV
+
+    - name: Sets env vars for pull to main
+      if: ${{ github.base_ref == 'main' }}
+      run: |
+        IMAGE_TAG=`mvn help:evaluate -Dexpression=project.version -q -DforceStdout | sed "s/-.*$/-IZGW-SNAPSHOT-${{github.run_number}}/"`
+        echo IMAGE_TAG=$IMAGE_TAG >> $GITHUB_ENV
+        echo DO_REVISION_CHECK=false >> $GITHUB_ENV
+        echo SKIP_DEPENDENCY_CHECK=true >> $GITHUB_ENV
+
+    - name: Sets env vars for push to main
+      if: ${{ github.ref_name == 'main' }}
+      run: |
+        IMAGE_TAG=`mvn help:evaluate -Dexpression=project.version -q -DforceStdout | sed "s/-.*$/-IZGW-RELEASE-${{github.run_number}}/"`
+        echo IMAGE_TAG=$IMAGE_TAG >> $GITHUB_ENV
+        echo DO_REVISION_CHECK=false >> $GITHUB_ENV
+        echo SKIP_DEPENDENCY_CHECK=false >> $GITHUB_ENV
+
+    - name: List env
+      shell: bash
+      run: |
+        echo BASE_REF: ${{ github.base_ref }}
+        echo HEAD_REF: ${{ github.head_ref }}
+        echo REF_NAME: ${{ github.ref_name }}
+        echo REF: ${{ github.ref }}
+        echo EVENT_NAME ${{ github.event_name }}
+        echo TAG: $BASE_TAG
+        echo DO_REVISION_CHECK: $DO_REVISION_CHECK
+        echo SKIP_DEPENDENCY_CHECK: $SKIP_DEPENDENCY_CHECK
+        echo IMAGE_TAG: $IMAGE_TAG
+
+    - name: Maven Build, Test, and Deploy
+      run: |
+        mvn -B -U clean package deploy \
+            -Dbuildno=${{github.run_number}} \
+            -DdoRevisionCheck=${{env.DO_REVISION_CHECK}} \
+            -DskipDependencyCheck=${{env.SKIP_DEPENDENCY_CHECK}}
+
+    - name: Upload build environment on failure
+      uses: actions/upload-artifact@v7
+      if: ${{ failure() }}
+      with:
+        name: build-failure
+        path: .
+
+    - name: Upload dependency check report
+      uses: actions/upload-artifact@v7
+      if: ${{ ! env.SKIP_DEPENDENCY_CHECK }}
+      with:
+        name: DependencyCheck
+        path: ./target/site/dependency-check-report.html
