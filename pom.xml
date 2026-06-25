@@ -42,7 +42,7 @@
         <repository>
             <id>github-core</id>
             <name>izgw-core</name>
-            <url>https://maven.pkg.github.com/IZGateway/izgw-core</url>
+            <url>https://maven.pkg.github.com/izgateway/izgw-core</url>
             <releases><enabled>true</enabled></releases>
             <snapshots><enabled>true</enabled></snapshots>
         </repository>
