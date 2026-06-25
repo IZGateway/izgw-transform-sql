@@ -8,14 +8,23 @@ backends alongside the existing IZ Gateway path.
 
 ## Building
 
-This module is not built standalone. It is included as a profile-activated
-dependency in `izgw-transform`:
+```cmd
+mvn clean package
+mvn test
+mvn dependency-check:check
+```
+
+This module builds as a library JAR and publishes to GitHub Packages. It does
+not produce a runnable service image on its own.
+
+To produce a SQL-enabled `izgw-transform` service image, activate the
+`sql-support` profile and a driver profile in `izgw-transform`:
 
 ```
 mvn package -P sql-support,sql-mssql
 ```
 
-See `izgw-transform` for full build and deployment documentation.
+See `izgw-transform` for full service build and deployment documentation.
 
 ## Documentation
 
