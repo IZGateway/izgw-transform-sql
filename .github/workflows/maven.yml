@@ -127,6 +127,7 @@ jobs:
       run: |
         mvn -B -U clean package deploy \
             -Dbuildno=${{github.run_number}} \
+            -DdoRevisionCheck=${{env.DO_REVISION_CHECK}} \
             -DskipDependencyCheck=${{env.SKIP_DEPENDENCY_CHECK}}
 
     - name: Upload build environment on failure
