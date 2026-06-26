@@ -1,5 +1,6 @@
 package gov.cdc.izgateway.xform.sql;
 
+import gov.cdc.izgateway.security.AccessControlRegistry;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import jakarta.annotation.security.RolesAllowed;
@@ -7,6 +8,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.hl7.fhir.r4.model.Bundle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -22,6 +24,10 @@ import org.springframework.web.bind.annotation.*;
 public class SqlFhirController {
 
     private static final Logger log = LoggerFactory.getLogger(SqlFhirController.class);
+
+    public SqlFhirController(@Autowired AccessControlRegistry registry) {
+        registry.register(this);
+    }
 
     @Operation(summary = "SQL-backed FHIR patient/immunization query")
     @ApiResponse(responseCode = "200", description = "Query completed")
