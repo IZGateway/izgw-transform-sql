@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.*;
  */
 @RestController
 @RequestMapping("/sql/fhir/{name}")
-@RolesAllowed({"XFORM_SENDING_SYSTEM", "ADMIN"})
+@RolesAllowed({"xform-sender", "admin"})
 public class SqlFhirController {
 
     private static final Logger log = LoggerFactory.getLogger(SqlFhirController.class);

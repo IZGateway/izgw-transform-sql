@@ -21,7 +21,7 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/bulk/sql/fhir")
-@RolesAllowed({"XFORM_SENDING_SYSTEM", "BULK_EXPORT", "ADMIN"})
+@RolesAllowed({"xform-sender", "admin"})
 public class BulkExportController {
 
     private static final Logger log = LoggerFactory.getLogger(BulkExportController.class);
