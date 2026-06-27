@@ -5,6 +5,10 @@
 > response formats, and FHIR operations are identical; only the base URL and data
 > source differ.
 
+> **Implementation status:** Stage 1 endpoints are live at `dev.sql-xform.izgateway.org`.
+> Single-patient queries currently return an empty Bundle (patient matching and
+> immunization retrieval are implemented in Stage 2). Bulk export is fully functional.
+
 ---
 
 ## Base URL
