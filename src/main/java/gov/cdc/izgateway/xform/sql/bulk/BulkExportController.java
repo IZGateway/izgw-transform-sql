@@ -70,7 +70,7 @@ public class BulkExportController {
         log.info("Bulk export job created: {}", job.getId());
 
         return ResponseEntity.accepted()
-            .location(statusUrl)
+            .header("Content-Location", statusUrl.toString())
             .build();
     }
 

@@ -43,7 +43,7 @@ class BulkExportControllerTests {
         ResponseEntity<Void> response = controller.kickoff(
             "application/fhir+json", "respond-async", null, null, null, req);
         assertEquals(HttpStatus.ACCEPTED, response.getStatusCode());
-        assertNotNull(response.getHeaders().getLocation());
+        assertNotNull(response.getHeaders().getFirst("Content-Location"));
     }
 
     @Test
