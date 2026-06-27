@@ -1,5 +1,6 @@
 package gov.cdc.izgateway.xform.sql.bulk;
 
+import gov.cdc.izgateway.security.AccessControlRegistry;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.servlet.http.HttpServletRequest;
@@ -30,10 +31,12 @@ public class BulkExportController {
 
     public BulkExportController(
         @Autowired BulkExportJobStore jobStore,
-        @Autowired BulkExportOutputStore outputStore
+        @Autowired BulkExportOutputStore outputStore,
+        @Autowired AccessControlRegistry registry
     ) {
         this.jobStore = jobStore;
         this.outputStore = outputStore;
+        registry.register(this);
     }
 
     @Operation(summary = "Kick off a Bulk FHIR export job")

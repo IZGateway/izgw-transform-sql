@@ -1,0 +1,4 @@
+"IIS Patient ID","Name - First","Name - Middle","Name - Last","Date of Birth",Gender,"Address: Street","Address: City","Address: State","Address: Zip","Telephone Number","Record Creation Date"
+1001,John,A,Smith,1985-03-15,M,"123 Main St",Springfield,IL,62701,2175551234,2021-01-01
+1002,Jane,,Doe,1990-07-22,F,"456 Oak Ave",Chicago,IL,60601,3125559876,2021-01-02
+1003,Robert,B,Johnson,1975-11-08,M,"789 Pine Rd",Rockford,IL,61101,8155554321,2021-01-03

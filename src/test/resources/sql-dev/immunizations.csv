@@ -1,0 +1,4 @@
+"IIS Patient ID","IIS Vaccination Event ID","Vaccine Type (CVX)","Vaccine Type (NDC)","Administration Date",Manufacturer,"Lot Number","Event Record Type","Route of Administration","Site of Administration","Expiration Date","Dose Volume","Record Creation Date"
+1001,5001,208,59267-1000-01,2021-05-01,PFR,LOT001,00,IM,LA,2021-12-31,0.3,2021-05-01
+1001,5002,208,59267-1000-01,2021-06-01,PFR,LOT002,00,IM,LA,2021-12-31,0.3,2021-06-01
+1002,5003,08,58160-0820-01,2021-03-15,SKB,LOT003,00,SC,RA,2021-09-15,0.5,2021-03-15

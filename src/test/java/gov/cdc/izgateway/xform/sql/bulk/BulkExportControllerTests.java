@@ -1,7 +1,9 @@
 package gov.cdc.izgateway.xform.sql.bulk;
 
+import gov.cdc.izgateway.security.AccessControlRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -18,7 +20,7 @@ class BulkExportControllerTests {
     void setUp() {
         jobStore = new InMemoryBulkExportJobStore();
         outputStore = new TempFileBulkExportOutputStore();
-        controller = new BulkExportController(jobStore, outputStore);
+        controller = new BulkExportController(jobStore, outputStore, Mockito.mock(AccessControlRegistry.class));
     }
 
     @Test

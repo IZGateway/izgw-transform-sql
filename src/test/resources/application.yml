@@ -1,0 +1,4 @@
+sql:
+  dev:
+    patients-path: classpath:sql-dev/patients.csv
+    immunizations-path: classpath:sql-dev/immunizations.csv

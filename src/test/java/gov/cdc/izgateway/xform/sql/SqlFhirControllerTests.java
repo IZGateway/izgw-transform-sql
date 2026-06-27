@@ -1,7 +1,9 @@
 package gov.cdc.izgateway.xform.sql;
 
+import gov.cdc.izgateway.security.AccessControlRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -14,7 +16,7 @@ class SqlFhirControllerTests {
 
     @BeforeEach
     void setUp() {
-        controller = new SqlFhirController();
+        controller = new SqlFhirController(Mockito.mock(AccessControlRegistry.class));
     }
 
     @Test

@@ -1,0 +1,131 @@
+mappings:
+  # Patient fields
+  - column: "IIS Patient ID"
+    resource: Patient
+    path: identifier
+    type: string
+    system: "urn:oid:2.16.840.1.114222.4.1"
+
+  - column: "Name - First"
+    resource: Patient
+    path: name.given
+    type: string
+
+  - column: "Name - Middle"
+    resource: Patient
+    path: name.given
+    type: string
+
+  - column: "Name - Last"
+    resource: Patient
+    path: name.family
+    type: string
+
+  - column: "Date of Birth"
+    resource: Patient
+    path: birthDate
+    type: date
+
+  - column: Gender
+    resource: Patient
+    path: gender
+    type: code
+    concept_map:
+      - from: M
+        to: male
+      - from: F
+        to: female
+
+  - column: "Address: Street"
+    resource: Patient
+    path: address.line
+    type: string
+
+  - column: "Address: City"
+    resource: Patient
+    path: address.city
+    type: string
+
+  - column: "Address: State"
+    resource: Patient
+    path: address.state
+    type: string
+
+  - column: "Address: Zip"
+    resource: Patient
+    path: address.postalCode
+    type: string
+
+  - column: "Telephone Number"
+    resource: Patient
+    path: telecom.phone
+    type: string
+
+  - column: "Record Creation Date"
+    resource: Patient
+    path: meta.lastUpdated
+    type: dateTime
+    is_last_updated: true
+
+  # Immunization fields
+  - column: "IIS Vaccination Event ID"
+    resource: Immunization
+    path: identifier
+    type: string
+    system: "urn:oid:2.16.840.1.114222.4.1"
+
+  - column: "Vaccine Type (CVX)"
+    resource: Immunization
+    path: vaccineCode.cvx
+    type: code
+
+  - column: "Vaccine Type (NDC)"
+    resource: Immunization
+    path: vaccineCode.ndc
+    type: code
+
+  - column: "Administration Date"
+    resource: Immunization
+    path: occurrenceDateTime
+    type: dateTime
+
+  - column: Manufacturer
+    resource: Immunization
+    path: manufacturer
+    type: string
+
+  - column: "Lot Number"
+    resource: Immunization
+    path: lotNumber
+    type: string
+
+  - column: "Event Record Type"
+    resource: Immunization
+    path: status
+    type: code
+
+  - column: "Route of Administration"
+    resource: Immunization
+    path: route
+    type: code
+
+  - column: "Site of Administration"
+    resource: Immunization
+    path: site
+    type: code
+
+  - column: "Expiration Date"
+    resource: Immunization
+    path: expirationDate
+    type: date
+
+  - column: "Dose Volume"
+    resource: Immunization
+    path: doseQuantity
+    type: decimal
+
+  - column: "Record Creation Date"
+    resource: Immunization
+    path: meta.lastUpdated
+    type: dateTime
+    is_last_updated: true
