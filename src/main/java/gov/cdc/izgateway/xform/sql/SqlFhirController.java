@@ -3,6 +3,7 @@ package gov.cdc.izgateway.xform.sql;
 import gov.cdc.izgateway.security.AccessControlRegistry;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import ca.uhn.fhir.context.FhirContext;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.servlet.http.HttpServletRequest;
 import org.hl7.fhir.r4.model.Bundle;
@@ -26,18 +27,23 @@ import org.springframework.web.bind.annotation.*;
 public class SqlFhirController {
 
     private static final Logger log = LoggerFactory.getLogger(SqlFhirController.class);
+    private static final FhirContext FHIR_CTX = FhirContext.forR4();
 
     public SqlFhirController(@Autowired AccessControlRegistry registry) {
         registry.register(this);
     }
 
+    private ResponseEntity<String> fhirJson(Bundle bundle) {
+        String json = FHIR_CTX.newJsonParser().encodeResourceToString(bundle);
+        return ResponseEntity.ok()
+            .header("Content-Type", "application/fhir+json")
+            .body(json);
+    }
+
     @Operation(summary = "SQL-backed FHIR patient/immunization query")
     @ApiResponse(responseCode = "200", description = "Query completed")
-    @GetMapping(
-        value = {"/{resourceType}", "/{resourceType}/_search"},
-        produces = {"application/fhir+json", "application/fhir+xml", "application/json", "application/xml"}
-    )
-    public ResponseEntity<Bundle> query(
+    @GetMapping(value = {"/{resourceType}", "/{resourceType}/_search"})
+    public ResponseEntity<String> query(
         @PathVariable String name,
         @PathVariable String resourceType,
         HttpServletRequest req
@@ -46,11 +52,11 @@ public class SqlFhirController {
         Bundle empty = new Bundle();
         empty.setType(Bundle.BundleType.SEARCHSET);
         empty.setTotal(0);
-        return new ResponseEntity<>(empty, HttpStatus.OK);
+        return fhirJson(empty);
     }
 
     @GetMapping("/{resourceType}/{id}")
-    public ResponseEntity<Bundle> read(
+    public ResponseEntity<String> read(
         @PathVariable String name,
         @PathVariable String resourceType,
         @PathVariable String id,
@@ -58,20 +64,20 @@ public class SqlFhirController {
     ) {
         Bundle empty = new Bundle();
         empty.setType(Bundle.BundleType.SEARCHSET);
-        return new ResponseEntity<>(empty, HttpStatus.OK);
+        return fhirJson(empty);
     }
 
     @PostMapping(
         value = {"/{resourceType}/$match"},
         produces = {"application/fhir+json", "application/fhir+xml", "application/json"}
     )
-    public ResponseEntity<Bundle> patientMatch(
+    public ResponseEntity<String> patientMatch(
         @PathVariable String name,
         @PathVariable String resourceType,
         HttpServletRequest req
     ) {
         Bundle empty = new Bundle();
         empty.setType(Bundle.BundleType.SEARCHSET);
-        return new ResponseEntity<>(empty, HttpStatus.OK);
+        return fhirJson(empty);
     }
 }
