@@ -1,0 +1,62 @@
+col_name,data_type,category,source_expression,description,fhir_resource,fhir_element,notes
+VACC_EVENT_ID,string,"REPLACE(CONCAT('WA','V',pat_id,vacc_code,vacc_date,irms_id,family_code), Char(9), '')",Identifier,Synthetic unique vaccination event identifier prefixed with 'WA',Immunization,identifier,
+IRMS_SYS_ID,double,CAST(i.irms_sys_id AS DOUBLE),Identifier,IRMS system ID of the administering provider,Immunization,performer.actor,
+ASIIS_FAC_ID,double,CAST(fm.asiis_fac_id AS DOUBLE),Identifier,ASIIS facility identifier,Location,identifier,
+ASIIS_VACC_CODE,double,CAST(vm.asiis_vacc_code AS DOUBLE),Identifier,ASIIS vaccine code (internal),Immunization,vaccineCode,Map to CVX via BEST_CDC_CODE
+ASIIS_PAT_ID,double,CAST(pm.asiis_pat_id AS DOUBLE),Identifier,ASIIS patient identifier,Patient,identifier,
+IWEB_VACC_EVENT_ID,string,vm.iweb_vacc_event_id,Identifier,iWeb vaccination event ID (legacy),Immunization,identifier,Not in published data dictionary
+PAT_FIRST_NAME,string,pm.pat_first_name,Patient,Patient first name,Patient,name.given,
+PAT_MIDDLE_NAME,string,pm.pat_middle_name,Patient,Patient middle name,Patient,name.given,
+PAT_LAST_NAME,string,pm.pat_last_name,Patient,Patient family name,Patient,name.family,
+PAT_BIRTH_DATE,date,"to_date(pm.pat_birth_date,'yyyy-MM-dd')",Patient,Patient date of birth,Patient,birthDate,
+PAT_GENDER,string,pm.pat_gender,Patient,Patient administrative gender,Patient,gender,Map M/F/U to male/female/unknown
+PAT_ETHNICITY_CODE,string,CAST(pm.pat_ethnicity_code AS string),Patient,Patient ethnicity code (HL7 table),Patient,extension:ethnicity,
+PAT_LANGUAGE,string,pm.pat_language,Patient,Patient preferred language,Patient,communication.language,
+PAT_ADDRESS_PHONE,string,pl.address_phone,Patient,Patient phone number,Patient,telecom[phone],
+PAT_ADDRESS_EMAIL,string,pm.address_email,Patient,Patient email address,Patient,telecom[email],
+PAT_ADDRESS_STREET1,string,"REPLACE(pz.address_street1, Char(9), '')",PatientAddress,Patient street address line 1 (current),Patient,address.line,
+PAT_ADDRESS_STREET2,string,"REPLACE(pz.address_street2, Char(9), '')",PatientAddress,Patient street address line 2 (current),Patient,address.line,
+PAT_ADDRESS_CITY,string,"REPLACE(pz.address_city, Char(9), '')",PatientAddress,Patient city (current),Patient,address.city,
+PAT_COUNTY_CODE,string,"COALESCE(pz.county_fips, pma.county_fips)",PatientAddress,Patient county FIPS code (current),Patient,address.district,FIPS 5-digit code
+PAT_ADDRESS_STATE,string,"COALESCE(pz.state, pma.state)",PatientAddress,Patient state (current),Patient,address.state,
+PAT_ADDRESS_ZIP,string,"COALESCE(pz.address_zip, pma.address_zip)",PatientAddress,Patient ZIP code (current),Patient,address.postalCode,Normalized to 5 digits
+ATO_PAT_ADDRESS_STREET1,string,"REPLACE(AAV.ADDRESS_STREET1, CHAR(9),'')",ATOAddress,Patient street address line 1 at time of vaccination,Patient,address.line,Address ATO = At Time Of (vaccination)
+ATO_PAT_ADDRESS_STREET2,string,"REPLACE(AAV.ADDRESS_STREET2, CHAR(9),'')",ATOAddress,Patient street address line 2 at time of vaccination,Patient,address.line,
+ATO_PAT_ADDRESS_CITY,string,"REPLACE(AAV.ADDRESS_CITY, CHAR(9),'')",ATOAddress,Patient city at time of vaccination,Patient,address.city,
+ATO_PAT_COUNTY_CODE,string,"COALESCE(AAV.county_fips, pma.county_fips)",ATOAddress,Patient county FIPS at time of vaccination,Patient,address.district,
+ATO_PAT_ADDRESS_STATE,string,"COALESCE(AAV.state, pma.state)",ATOAddress,Patient state at time of vaccination,Patient,address.state,
+ATO_PAT_ADDRESS_ZIP,string,"COALESCE(AAV.address_zip, pma.address_zip)",ATOAddress,Patient ZIP at time of vaccination,Patient,address.postalCode,
+PAT_RACE1,int,mr.`1`,PatientRace,Patient race code slot 1 (ASIIS code),Patient,extension:race,Map ASIIS race codes to OMB/CDC race codes
+PAT_RACE2,int,mr.`2`,PatientRace,Patient race code slot 2,Patient,extension:race,
+PAT_RACE3,int,mr.`3`,PatientRace,Patient race code slot 3,Patient,extension:race,
+PAT_RACE4,int,mr.`4`,PatientRace,Patient race code slot 4,Patient,extension:race,
+PAT_RACE5,int,mr.`5`,PatientRace,Patient race code slot 5,Patient,extension:race,
+PAT_RACE6,int,mr.`6`,PatientRace,Patient race code slot 6,Patient,extension:race,
+VACC_DATE,date,"to_date(vm.vacc_date, 'yyyy-MM-dd')",Vaccination,Date vaccination was administered,Immunization,occurrenceDateTime,
+BEST_CDC_CODE,double,CAST(vc.best_cdc_code AS DOUBLE),Vaccination,CVX vaccine code (CDC),Immunization,vaccineCode,CVX code system: http://hl7.org/fhir/sid/cvx
+NDC_CODE,string,m.ndc_number,Vaccination,NDC drug code for administered vaccine product,Immunization,vaccineCode,NDC code system
+MANU_CODE,string,vm.manu_code,Vaccination,Vaccine manufacturer code (MVX),Immunization,manufacturer,MVX code system: http://terminology.hl7.org/CodeSystem/mvx
+LOT_NUM,string,"REPLACE(vm.lot_num, Char(9), '')",Vaccination,Vaccine lot number,Immunization,lotNumber,
+EXPIRATION_DATE,date,"to_date(ln.expiration_date,'yyyy-MM-dd')",Vaccination,Vaccine lot expiration date,Immunization,expirationDate,
+ANATOMICAL_SITE,string,CASE vm.anatomical_site WHEN 'LEFT_THIGH' THEN 'LT' WHEN 'LEFT_ARM' THEN 'LA' ... END,Vaccination,Anatomical site of administration (HL7 table 0163),Immunization,site,Mapped to HL7 body site codes
+ANATOMICAL_ROUTE,string,CASE vm.anatomical_route WHEN 'INTRAMUSCULAR' THEN 'C28161' ... END,Vaccination,Route of administration (NCI Thesaurus C-codes),Immunization,route,Mapped to NCI codes; see notebook for full mapping
+DOSE_NUMBER,string,CASE WHEN valid_vacc='N' OR invalid_reason IS NOT NULL THEN 'INV' WHEN dose_number IS NULL THEN 'UNK' ELSE dose_number END,Vaccination,"Dose number in series; INV=invalid, UNK=unknown",Immunization,protocolApplied.doseNumber,
+SERIES_COMPLETE,string,CASE WHEN series_complete='Y' THEN 'YES' WHEN 'N' THEN 'NO' ELSE 'UNK' END,Vaccination,Whether series is complete (YES/NO/UNK),Immunization,protocolApplied.seriesDosesString,
+HISTORICAL,string,vm.historical,Vaccination,Whether record is historical (not administered at facility),Immunization,primarySource,Historical = not primary source
+REPORTING_METHOD,string,vr.reporting_method,Vaccination,Method by which vaccination was reported,Immunization,reportOrigin,
+VFC_ELIGIBLE,double,CAST(vr.vfc_eligible AS DOUBLE),Vaccination,Vaccines for Children eligibility flag,Immunization,fundingSource,
+CC_VOLUME,string,vm.cc_volume,Vaccination,Volume of vaccine administered (cc/mL),Immunization,doseQuantity,Not in published data dictionary
+INSERT_STAMP,timestamp,vm.insert_stamp,Audit,Timestamp when record was inserted into WAIIS,Immunization,recorded,
+REGISTRY_ENTRY_STAMP,date,"to_date(vr.registry_entry_stamp,'yyyy-MM-dd')",Audit,Date record entered into registry,Immunization,recorded,
+DELETION_DATE,date,"to_date(vm.DELETION_DATE,'yyyy-MM-dd')",Audit,Date record was logically deleted; NULLs filtered in view,Immunization,status,Active records have NULL deletion_date
+FAMILY_CODE,int,vf.family_code,Facility,Vaccine family classification code,Immunization,vaccineCode,
+ORG_NAME,string,"COALESCE(Replace(i.NAME,Char(9),''), Replace(fm.NAME,Char(9),''))",Facility,Administering organization name,Organization,name,
+FAC_NAME,string,"COALESCE(Replace(fm.NAME,Char(9),''), Replace(i.NAME,Char(9),''))",Facility,Administering facility name,Location,name,
+VFC_PIN,string,"COALESCE(fm.pin, i.pin)",Facility,VFC program PIN for administering facility,Organization,identifier,
+PROVIDER_FACILITY_TYPE,string,CASE fm.provider_facility_type ... END,Facility,HL7 v2 table 0442 facility type code (numeric string),Location,type,Mapped from WAIIS facility type strings to HL7 codes
+FAC_ADDRESS_STREET1,string,"Replace(fm.address_street1, Char(9), '')",Facility,Facility street address line 1,Location,address.line,
+FAC_ADDRESS_STREET2,string,"substr(Replace(fm.address_street2,Char(9),''),1,25)",Facility,Facility street address line 2 (truncated to 25 chars),Location,address.line,
+FAC_ADDRESS_CITY,string,fz.city,Facility,Facility city (from geocoding zip table),Location,address.city,
+FAC_ADDRESS_COUNTY_CODE,bigint,fz.county_fips,Facility,Facility county FIPS code,Location,address.district,
+FAC_ADDRESS_STATE,string,fz.state,Facility,Facility state,Location,address.state,
+FAC_ADDRESS_ZIP,string,fz.zip,Facility,Facility ZIP code (normalized),Location,address.postalCode,

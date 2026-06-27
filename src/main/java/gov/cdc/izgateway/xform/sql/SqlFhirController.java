@@ -9,6 +9,7 @@ import org.hl7.fhir.r4.model.Bundle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -19,8 +20,9 @@ import org.springframework.web.bind.annotation.*;
  * FhirController at /fhir/**.
  */
 @RestController
+@Lazy(false)
 @RequestMapping("/sql/fhir/{name}")
-@RolesAllowed({"XFORM_SENDING_SYSTEM", "ADMIN"})
+@RolesAllowed({"xform-sender", "admin"})
 public class SqlFhirController {
 
     private static final Logger log = LoggerFactory.getLogger(SqlFhirController.class);
