@@ -31,4 +31,12 @@ public class SqlMappingConfiguration {
             .findFirst()
             .orElse(null);
     }
+
+    public String columnForPath(String resourceType, String path) {
+        return forResource(resourceType).stream()
+            .filter(m -> path.equals(m.getPath()))
+            .map(ResourceMapping::getColumn)
+            .findFirst()
+            .orElse(null);
+    }
 }

@@ -22,10 +22,14 @@ public class SqlBackendProperties {
     public static class Tables {
         private String patient = "patient_view";
         private String immunization = "immunization_view";
+        /** Column in both patient and immunization tables used to link records. Null = auto-detect from mapping. */
+        private String patientIdColumn;
         public String getPatient() { return patient; }
         public void setPatient(String patient) { this.patient = patient; }
         public String getImmunization() { return immunization; }
         public void setImmunization(String immunization) { this.immunization = immunization; }
+        public String getPatientIdColumn() { return patientIdColumn; }
+        public void setPatientIdColumn(String patientIdColumn) { this.patientIdColumn = patientIdColumn; }
     }
 
     public static class Dev {
