@@ -14,11 +14,10 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * CSV-backed dev fixture for the sql-dev backend. No JDBC driver required.
- * Patient search is a Java stream filter; immunization retrieval is a
- * second filter on patient ID.
+ * CSV-backed dev fixture using two separate patient and immunization files
+ * (hub test data format). No JDBC driver required.
  */
-public class SqlDevBackend {
+public class SqlDevBackend implements IQueryBackend {
 
     private static final Logger log = LoggerFactory.getLogger(SqlDevBackend.class);
 
@@ -29,30 +28,27 @@ public class SqlDevBackend {
     private final TabularFhirConverter converter;
     private final double matchThreshold;
 
-    public SqlDevBackend(SqlBackendProperties props, SqlMappingConfiguration config) {
-        this.matchThreshold = props.getMatchingThreshold();
-        this.patientMapper = new SqlPatientRowMapper(config);
-        this.immunizationMapper = new SqlImmunizationRowMapper(config);
+    public SqlDevBackend(SqlBackendConfig config, SqlMappingConfiguration mappingConfig, double matchThreshold) {
+        this.matchThreshold = matchThreshold;
+        this.patientMapper = new SqlPatientRowMapper(mappingConfig);
+        this.immunizationMapper = new SqlImmunizationRowMapper(mappingConfig);
         this.converter = new TabularFhirConverter(patientMapper, immunizationMapper);
-        this.patients = loadCsv(props.getDev().getPatientsPath(), "patients");
-        this.immunizations = loadCsv(props.getDev().getImmunizationsPath(), "immunizations");
-        log.info("sql-dev fixture loaded: {} patients, {} immunizations",
-            patients.size(), immunizations.size());
+        this.patients = loadCsv(config.getPatientsPath(), "patients");
+        this.immunizations = loadCsv(config.getImmunizationsPath(), "immunizations");
+        log.info("sql-dev fixture loaded: {} patients, {} immunizations", patients.size(), immunizations.size());
     }
 
-    public Bundle query(Patient searchPatient, String lastUpdated) {
-        String lastName = searchPatient.getNameFirstRep().getFamily();
-        String dob = searchPatient.getBirthDateElement().asStringValue();
+    @Override
+    public QueryResult query(Patient searchPatient, String lastUpdated) {
+        String lastName = searchPatient.hasName() ? searchPatient.getNameFirstRep().getFamily() : "";
+        String dob = searchPatient.hasBirthDate() ? searchPatient.getBirthDateElement().asStringValue() : "";
 
         List<Map<String, String>> candidates = patients.stream()
             .filter(row -> matches(row, lastName, dob))
             .collect(Collectors.toList());
 
         if (candidates.isEmpty()) {
-            Bundle empty = new Bundle();
-            empty.setType(Bundle.BundleType.SEARCHSET);
-            empty.setTotal(0);
-            return empty;
+            return QueryResult.noMatch();
         }
 
         Map<String, String> matched = candidates.get(0);
@@ -67,7 +63,7 @@ public class SqlDevBackend {
             .map(row -> (Map<String, Object>) (Map<?, ?>) row)
             .collect(Collectors.toList());
 
-        return converter.toBundle(patient, immRows);
+        return QueryResult.bundle(converter.toBundle(patient, immRows));
     }
 
     private boolean matches(Map<String, String> row, String lastName, String dob) {
@@ -105,7 +101,7 @@ public class SqlDevBackend {
         return rows;
     }
 
-    private static String[] parseCsvLine(String line) {
+    static String[] parseCsvLine(String line) {
         List<String> fields = new ArrayList<>();
         boolean inQuotes = false;
         StringBuilder current = new StringBuilder();

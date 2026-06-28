@@ -1,0 +1,17 @@
+# SQL backend configuration defaults.
+# Activated when the sql-support Maven profile is used (IS_SQL=true builds).
+# All values are overridable via environment variables using Spring's
+# relaxed binding (SQL_BACKENDS_TEST_DATA_PATH -> sql.backends.test.data-path).
+
+sql:
+  matching-threshold: 0.95
+  backends:
+    dev:
+      type: DEV_CSV
+      patients-path: classpath:sql-dev/patients.csv
+      immunizations-path: classpath:sql-dev/immunizations.csv
+      mapping-config-path: classpath:sql-mapping.yml
+    test:
+      type: CSV
+      data-path: ${SQL_BACKENDS_TEST_DATA_PATH:/data/all_vax_event.csv}
+      mapping-config-path: ${SQL_BACKENDS_TEST_MAPPING_CONFIG_PATH:classpath:sql-mapping.yml}

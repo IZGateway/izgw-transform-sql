@@ -14,13 +14,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.lang.Nullable;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 /**
  * Handles single-patient FHIR queries against named SQL backends.
- * Routes "dev" to the CSV fixture (SqlDevBackend) and any other name
- * to the JDBC backend (SqlFhirBackend) when one is configured.
+ * Routes each {name} to the registered IQueryBackend for that name.
+ * Backends are registered by SqlBackendAutoConfiguration from sql.backends config.
  */
 @RestController
 @Lazy(false)
@@ -31,18 +32,14 @@ public class SqlFhirController {
     private static final Logger log = LoggerFactory.getLogger(SqlFhirController.class);
     private static final FhirContext FHIR_CTX = FhirContext.forR4();
 
-    private final SqlDevBackend devBackend;
-    private final SqlFhirBackend jdbcBackend;
+    private final Map<String, IQueryBackend> backends;
 
-    public SqlFhirController(@Autowired SqlDevBackend devBackend,
-                             @Autowired(required = false) @Nullable SqlFhirBackend jdbcBackend,
+    public SqlFhirController(@Autowired Map<String, IQueryBackend> backends,
                              @Autowired AccessControlRegistry registry) {
-        this.devBackend = devBackend;
-        this.jdbcBackend = jdbcBackend;
+        this.backends = backends;
         registry.register(this);
+        log.info("SqlFhirController registered with backends: {}", backends.keySet());
     }
-
-    // ── Query endpoints ───────────────────────────────────────────────────────
 
     @Operation(summary = "SQL-backed FHIR patient/immunization query")
     @ApiResponse(responseCode = "200", description = "Query completed")
@@ -59,13 +56,22 @@ public class SqlFhirController {
     ) {
         log.debug("SQL FHIR query: backend={} resource={}", name, resourceType);
 
-        if ("Patient".equalsIgnoreCase(resourceType)) {
-            Patient search = buildSearchPatient(family, given, birthdate, gender);
-            return executeQuery(name, search, lastUpdated);
+        if (!"Patient".equalsIgnoreCase(resourceType)) {
+            return fhirJson(emptyBundle());
         }
 
-        // Non-Patient resources return empty bundle
-        return fhirJson(emptyBundle());
+        IQueryBackend backend = backends.get(name);
+        if (backend == null) {
+            return unavailable(name);
+        }
+
+        Patient search = buildSearchPatient(family, given, birthdate, gender);
+        QueryResult result = backend.query(search, lastUpdated);
+
+        if (result.isAmbiguous()) {
+            return fhirResponse(HttpStatus.UNPROCESSABLE_ENTITY, result.getOperationOutcome());
+        }
+        return fhirJson(result.getBundle());
     }
 
     @GetMapping("/{resourceType}/{id}")
@@ -87,58 +93,31 @@ public class SqlFhirController {
         @PathVariable String resourceType,
         HttpServletRequest req
     ) {
-        // Stage 3: stub -- full $match body parsing deferred
         return fhirJson(emptyBundle());
     }
 
-    // ── Internal helpers ──────────────────────────────────────────────────────
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private ResponseEntity<String> executeQuery(String backendName, Patient search, String lastUpdated) {
-        if ("dev".equals(backendName)) {
-            Bundle bundle = devBackend.query(search, lastUpdated);
-            return fhirJson(bundle);
+    private Patient buildSearchPatient(String family, String given, String birthdate, String gender) {
+        Patient p = new Patient();
+        if (family != null && !family.isBlank()) p.getNameFirstRep().setFamily(family);
+        if (given != null && !given.isBlank()) p.getNameFirstRep().addGiven(given);
+        if (birthdate != null && !birthdate.isBlank()) {
+            try { p.setBirthDateElement(new DateType(birthdate)); } catch (Exception ignored) {}
         }
-
-        if (jdbcBackend != null) {
-            SqlFhirBackend.QueryResult result = jdbcBackend.query(search, lastUpdated);
-            if (result.isAmbiguous()) {
-                return fhirResponse(HttpStatus.UNPROCESSABLE_ENTITY, result.getOperationOutcome());
-            }
-            return fhirJson(result.getBundle());
+        if (gender != null && !gender.isBlank()) {
+            try { p.setGender(Enumerations.AdministrativeGender.fromCode(gender)); } catch (Exception ignored) {}
         }
+        return p;
+    }
 
-        // Named backend requested but JDBC not configured
+    private ResponseEntity<String> unavailable(String name) {
         OperationOutcome outcome = new OperationOutcome();
         outcome.addIssue()
             .setSeverity(OperationOutcome.IssueSeverity.ERROR)
             .setCode(OperationOutcome.IssueType.NOTSUPPORTED)
-            .getDetails().setText("SQL backend '" + backendName + "' is not configured");
+            .getDetails().setText("SQL backend '" + name + "' is not configured");
         return fhirResponse(HttpStatus.SERVICE_UNAVAILABLE, outcome);
-    }
-
-    private Patient buildSearchPatient(String family, String given, String birthdate, String gender) {
-        Patient p = new Patient();
-        if (family != null && !family.isBlank()) {
-            p.getNameFirstRep().setFamily(family);
-        }
-        if (given != null && !given.isBlank()) {
-            p.getNameFirstRep().addGiven(given);
-        }
-        if (birthdate != null && !birthdate.isBlank()) {
-            try {
-                p.setBirthDateElement(new DateType(birthdate));
-            } catch (Exception e) {
-                log.debug("Could not parse birthdate '{}': {}", birthdate, e.getMessage());
-            }
-        }
-        if (gender != null && !gender.isBlank()) {
-            try {
-                p.setGender(Enumerations.AdministrativeGender.fromCode(gender));
-            } catch (Exception e) {
-                log.debug("Could not parse gender '{}': {}", gender, e.getMessage());
-            }
-        }
-        return p;
     }
 
     private static Bundle emptyBundle() {
@@ -153,9 +132,8 @@ public class SqlFhirController {
     }
 
     private ResponseEntity<String> fhirResponse(HttpStatus status, IBaseResource resource) {
-        String json = FHIR_CTX.newJsonParser().encodeResourceToString(resource);
         return ResponseEntity.status(status)
             .header("Content-Type", "application/fhir+json")
-            .body(json);
+            .body(FHIR_CTX.newJsonParser().encodeResourceToString(resource));
     }
 }

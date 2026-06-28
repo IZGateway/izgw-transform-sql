@@ -12,6 +12,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Executes a broad ANSI SQL candidate query for patient matching.
@@ -58,7 +59,9 @@ public class SqlPatientSearchService {
             return PatientSearchResult.noMatch();
         }
 
-        StringBuilder sql = new StringBuilder("SELECT * FROM ");
+        String patientColumns = buildPatientColumnList();
+        StringBuilder sql = new StringBuilder("SELECT DISTINCT ");
+        sql.append(patientColumns).append(" FROM ");
         sql.append(table);
         sql.append(" WHERE ((");
         sql.append(lastNameCol).append(" = :lastName AND ");
@@ -128,6 +131,14 @@ public class SqlPatientSearchService {
         }
         sql.append(" AND ").append(col).append(" ").append(sqlOp).append(" :lastUpdated");
         params.addValue("lastUpdated", dateVal);
+    }
+
+    private String buildPatientColumnList() {
+        List<String> cols = config.forResource("Patient").stream()
+            .map(m -> m.getColumn())
+            .distinct()
+            .collect(java.util.stream.Collectors.toList());
+        return cols.isEmpty() ? "*" : String.join(", ", cols);
     }
 
     private static String lastName(Patient p) {
