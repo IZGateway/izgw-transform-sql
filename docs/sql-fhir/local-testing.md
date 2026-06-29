@@ -109,12 +109,6 @@ docker run -d \
   --name izgw-sql-test \
   -p 444:444 \
   -e XFORM_JWT_SECRET=$XFORM_JWT_SECRET \
-  -e COMMON_PASS=changeit \
-  -e XFORM_CRYPTO_STORE_KEY_TOMCAT_SERVER_FILE=/ssl/local/server.bcfks \
-  -e XFORM_CRYPTO_STORE_TRUST_TOMCAT_SERVER_FILE=/ssl/local/trust.bcfks \
-  -e XFORM_CRYPTO_STORE_KEY_WS_CLIENT_FILE=/ssl/local/server.bcfks \
-  -e XFORM_CRYPTO_STORE_TRUST_WS_CLIENT_FILE=/ssl/local/trust.bcfks \
-  -e XFORM_CONFIGURATIONS_DIRECTORY=/usr/share/izg-transform/quickstart/configuration \
   -v ~/izgw-sql-test:/data \
   ghcr.io/izgateway/izgw-transform-sql:latest
 ```
@@ -125,12 +119,6 @@ docker run -d ^
   --name izgw-sql-test ^
   -p 444:444 ^
   -e XFORM_JWT_SECRET=%XFORM_JWT_SECRET% ^
-  -e COMMON_PASS=changeit ^
-  -e XFORM_CRYPTO_STORE_KEY_TOMCAT_SERVER_FILE=/ssl/local/server.bcfks ^
-  -e XFORM_CRYPTO_STORE_TRUST_TOMCAT_SERVER_FILE=/ssl/local/trust.bcfks ^
-  -e XFORM_CRYPTO_STORE_KEY_WS_CLIENT_FILE=/ssl/local/server.bcfks ^
-  -e XFORM_CRYPTO_STORE_TRUST_WS_CLIENT_FILE=/ssl/local/trust.bcfks ^
-  -e XFORM_CONFIGURATIONS_DIRECTORY=/usr/share/izg-transform/quickstart/configuration ^
   -v %USERPROFILE%\izgw-sql-test:/data ^
   ghcr.io/izgateway/izgw-transform-sql:latest
 ```
@@ -141,12 +129,6 @@ docker run -d `
   --name izgw-sql-test `
   -p 444:444 `
   -e XFORM_JWT_SECRET=$env:XFORM_JWT_SECRET `
-  -e COMMON_PASS=changeit `
-  -e XFORM_CRYPTO_STORE_KEY_TOMCAT_SERVER_FILE=/ssl/local/server.bcfks `
-  -e XFORM_CRYPTO_STORE_TRUST_TOMCAT_SERVER_FILE=/ssl/local/trust.bcfks `
-  -e XFORM_CRYPTO_STORE_KEY_WS_CLIENT_FILE=/ssl/local/server.bcfks `
-  -e XFORM_CRYPTO_STORE_TRUST_WS_CLIENT_FILE=/ssl/local/trust.bcfks `
-  -e XFORM_CONFIGURATIONS_DIRECTORY=/usr/share/izg-transform/quickstart/configuration `
   -v "${env:USERPROFILE}\izgw-sql-test:/data" `
   ghcr.io/izgateway/izgw-transform-sql:latest
 ```
@@ -373,9 +355,12 @@ ignored. The complete built-in mapping is in `sql-mapping-wadoh.yml`.
 
 | Variable | Default | Description |
 |---|---|---|
-| `XFORM_JWT_SECRET` | *(required)* | Base64-encoded HMAC-SHA256 signing key |
-| `COMMON_PASS` | *(required)* | Password for the built-in TLS keystore |
+| `XFORM_JWT_SECRET` | *(required -- no default)* | Base64-encoded HMAC-SHA256 signing key |
 | `SQL_BACKENDS_TEST_DATA_PATH` | `/data/all_vax_event.csv` | Path to your CSV file inside the container |
-| `SQL_BACKENDS_TEST_MAPPING_CONFIG_PATH` | *(classpath default)* | Path to a custom `sql-mapping.yml` |
-| `XFORM_CRYPTO_STORE_KEY_TOMCAT_SERVER_FILE` | *(required)* | Server TLS keystore path |
-| `XFORM_CRYPTO_STORE_TRUST_TOMCAT_SERVER_FILE` | *(required)* | Server trust store path |
+| `SQL_BACKENDS_TEST_MAPPING_CONFIG_PATH` | *(built-in WA DOH mapping)* | Path to a custom `sql-mapping.yml` inside the container |
+| `COMMON_PASS` | `changeit` | Password for the built-in TLS keystore |
+| `XFORM_CRYPTO_STORE_KEY_TOMCAT_SERVER_FILE` | `/ssl/local/server.bcfks` | Server TLS keystore path |
+| `XFORM_CRYPTO_STORE_TRUST_TOMCAT_SERVER_FILE` | `/ssl/local/trust.bcfks` | Server trust store path |
+| `XFORM_CRYPTO_STORE_KEY_WS_CLIENT_FILE` | `/ssl/local/server.bcfks` | WS client TLS keystore path |
+| `XFORM_CRYPTO_STORE_TRUST_WS_CLIENT_FILE` | `/ssl/local/trust.bcfks` | WS client trust store path |
+| `XFORM_CONFIGURATIONS_DIRECTORY` | `/usr/share/izg-transform/quickstart/configuration` | Configuration directory path |
