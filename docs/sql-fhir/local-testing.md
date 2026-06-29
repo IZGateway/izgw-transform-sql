@@ -88,7 +88,7 @@ docker run --rm `
   ghcr.io/izgateway/izgw-transform-sql:latest generate-token
 ```
 
-The command prints two tokens, each valid for one hour:
+The command prints two tokens, each valid for 30 days:
 
 - **Sender token** -- for patient queries and bulk export (`xform-sender` role)
 - **Admin token** -- includes both `xform-sender` and `admin` roles
