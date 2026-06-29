@@ -1,0 +1,970 @@
+-- Databricks notebook source
+-- MAGIC %run ../config_prod 
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC sql(f"""USE CATALOG tc_iis_prod""")
+-- MAGIC sql(f""" USE SCHEMA data_integration_interoperability """)
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### Subqueries
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC #### Multi-Race Subquery
+-- MAGIC This subquery serves to obtain the most up to date racial information on each patient. 
+
+-- COMMAND ----------
+
+DROP TABLE IF EXISTS MULTI_RACE
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC spark.sql(f'''
+-- MAGIC   CACHE LAZY TABLE MULTI_RACE
+-- MAGIC     SELECT 
+-- MAGIC         DISTINCT *
+-- MAGIC     FROM 
+-- MAGIC         (SELECT 
+-- MAGIC             asiis_pat_id_ptr, 
+-- MAGIC             pat_race,
+-- MAGIC             ROW_NUMBER() OVER(partition BY asiis_pat_id_ptr ORDER BY pat_race) RECORDS
+-- MAGIC         FROM(
+-- MAGIC               SELECT 
+-- MAGIC                   DISTINCT rm.asiis_pat_id_ptr,    
+-- MAGIC                   try_cast(rm.pat_race as int) as pat_race,
+-- MAGIC                   DENSE_RANK() OVER(partition BY rm.asiis_pat_id_ptr
+-- MAGIC                   ORDER BY CAST(rm.update_stamp AS TIMESTAMP) DESC) RACERANK 
+-- MAGIC               FROM {iisPATIENT_RACE_RESERVE} RM) A
+-- MAGIC         WHERE RACERANK=1) B
+-- MAGIC     PIVOT(MIN(PAT_RACE) FOR RECORDS IN (1,2,3,4,5,6))
+-- MAGIC ''')
+
+-- COMMAND ----------
+
+-- MAGIC %md 
+-- MAGIC #### Patient Address Subquery
+-- MAGIC Subquery serves to acquire the most up to date patient address information. 
+
+-- COMMAND ----------
+
+DROP TABLE IF EXISTS PAT_ADDRESS
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC #address_reserve_cols = [f"COALESCE({col}, '')" for col in sql(f"SELECT * FROM {ADDRESS_RESERVE} LIMIT 1").columns]
+-- MAGIC
+-- MAGIC spark.sql(f'''
+-- MAGIC   CACHE LAZY TABLE PAT_ADDRESS
+-- MAGIC     SELECT 
+-- MAGIC         DISTINCT AR.asiis_pat_id_ptr,
+-- MAGIC         AR.address_street1,
+-- MAGIC         AR.address_street2,
+-- MAGIC         AR.address_city,
+-- MAGIC         COALESCE(AR.address_state,GZ.state) AS STATE,
+-- MAGIC         CASE
+-- MAGIC           WHEN ( AR.county_code IS NULL OR AR.county_code = '0' ) THEN GZ.county_fips
+-- MAGIC           ELSE AR.county_code
+-- MAGIC         END AS COUNTY_FIPS,
+-- MAGIC         AR.address_zip,
+-- MAGIC         AR.address_country_code  
+-- MAGIC     FROM(
+-- MAGIC         SELECT 
+-- MAGIC             *
+-- MAGIC         FROM
+-- MAGIC             (
+-- MAGIC             SELECT 
+-- MAGIC                 asiis_pat_id_ptr,
+-- MAGIC                 address_street1,
+-- MAGIC                 address_street2,
+-- MAGIC                 address_city,
+-- MAGIC                 address_state,
+-- MAGIC                 -- Perform string concatenation based on specific conditions for 'COUNTY_FIPS' column (ADDRESS_RESERVE)
+-- MAGIC                 CASE
+-- MAGIC                   WHEN LENGTH(county_code) = 4 AND address_state IN ('AL','AK','AZ','AR','CA','CO','CT') THEN CONCAT('0', county_code)
+-- MAGIC                   WHEN LENGTH(county_code) < 4 OR (LENGTH(county_code) = 4 AND address_state NOT IN ( 'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT' ) ) THEN NULL
+-- MAGIC                   ELSE LEFT(county_code, 5)
+-- MAGIC                 END AS COUNTY_CODE,
+-- MAGIC                 -- Perform string concatenation based on specific conditions for 'ADDRESS_ZIP' column (ADDRESS_RESERVE)
+-- MAGIC                 CASE
+-- MAGIC                   WHEN LENGTH(address_zip) IN ( 4, 8 ) AND address_state IN ('NJ','AE','MA','ME','NH','RI','CT','NY','VT') THEN CONCAT('0', LEFT(address_zip,4))
+-- MAGIC                   WHEN LENGTH(address_zip) IN (3, 7) AND address_state IN ( 'PR', 'VI' ) THEN CONCAT('00', LEFT(address_zip, 3))
+-- MAGIC                   --Added for cases where state is null *** 
+-- MAGIC                   WHEN LENGTH(address_zip) < 5 AND address_state NOT IN ( 'NJ', 'AE', 'MA', 'ME', 'NH', 'RI', 'CT', 'NY', 'VT', 'PR', 'VI' ) OR address_state IS NULL THEN NULL
+-- MAGIC                   ELSE LEFT(address_zip, 5)
+-- MAGIC                 END AS ADDRESS_ZIP,
+-- MAGIC                 ADDRESS_COUNTRY_CODE,
+-- MAGIC                 ROW_NUMBER() OVER(partition BY asiis_pat_id_ptr
+-- MAGIC                   --ORDER BY FORMAT(update_stamp, 'MM/dd/yyyy HH:mm:ss') DESC, FORMAT(insert_stamp, 'MM/dd/yyyy HH:mm:ss') DESC) --REMOVE
+-- MAGIC                   --ORDER BY update_stamp DESC, insert_stamp DESC) AS row_num
+-- MAGIC                   ORDER BY update_stamp DESC, insert_stamp DESC, address_id) AS row_num
+-- MAGIC             FROM   
+-- MAGIC                 {iisADDRESS_RESERVE} 
+-- MAGIC             WHERE  
+-- MAGIC                 address_zip IS NOT NULL
+-- MAGIC                 OR ( county_code IS NOT NULL
+-- MAGIC                 AND county_code != 0 )) PA
+-- MAGIC         WHERE PA.ROW_NUM = 1) AR
+-- MAGIC
+-- MAGIC         LEFT JOIN (
+-- MAGIC           SELECT
+-- MAGIC           -- Perform string concatenation based on specific conditions for 'ADDRESS_ZIP' column (GEOCODING_ZIPCODES)
+-- MAGIC             CASE 
+-- MAGIC               WHEN LENGTH(zip) = 4 AND state IN ('NJ', 'AE', 'MA', 'ME', 'NH', 'RI', 'CT', 'NY', 'VT') THEN CONCAT('0', zip)
+-- MAGIC               WHEN LENGTH(zip) = 3 AND state IN ('PR', 'VI') THEN CONCAT('00', zip)
+-- MAGIC               WHEN LENGTH(zip) < 5 AND state NOT IN ('NJ', 'AE', 'MA', 'ME', 'NH', 'RI', 'CT', 'NY', 'VT', 'PR', 'VI') THEN NULL
+-- MAGIC               ELSE LEFT(zip, 5)
+-- MAGIC             END AS ZIP,
+-- MAGIC             -- Perform string concatenation based on specific conditions for 'COUNTY_FIPS' column (GEOCODING_ZIPCODES)
+-- MAGIC             CASE
+-- MAGIC               WHEN LENGTH(county_fips) = 4 AND state IN ('AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT') THEN CONCAT('0', county_fips)
+-- MAGIC               WHEN LENGTH(county_fips) < 4 OR (LENGTH(county_fips) = 4 AND state NOT IN ('AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT')) THEN NULL
+-- MAGIC               ELSE LEFT(county_fips, 5)
+-- MAGIC              END AS COUNTY_FIPS,
+-- MAGIC             STATE
+-- MAGIC           FROM
+-- MAGIC               {iisGEOCODING_ZIPCODES}) GZ 
+-- MAGIC         ON AR.ADDRESS_ZIP = GZ.ZIP
+-- MAGIC ''')
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC #### Facility Zipcode Subquery
+-- MAGIC Standardizing the zipcode format.
+
+-- COMMAND ----------
+
+DROP TABLE IF EXISTS FAC_ZIP
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC spark.sql(f'''
+-- MAGIC   CACHE LAZY TABLE FAC_ZIP
+-- MAGIC     SELECT 
+-- MAGIC         DISTINCT fm.asiis_fac_id,
+-- MAGIC         fm.zip,
+-- MAGIC         COALESCE(cf.county_fips, fm.county_code) AS COUNTY_FIPS,
+-- MAGIC         COALESCE(cf.state, fm.address_state) AS STATE,
+-- MAGIC         COALESCE(cf.city, fm.address_city) AS CITY
+-- MAGIC     FROM
+-- MAGIC         (SELECT 
+-- MAGIC             asiis_fac_id,
+-- MAGIC             -- Perform string concatenation based on specific conditions for 'ZIP' column (FACILITY_MASTER)
+-- MAGIC             CASE
+-- MAGIC                 WHEN LENGTH(address_zip) IN (4, 8) AND address_state IN ('NJ', 'AE', 'MA', 'ME', 'NH', 'RI', 'CT', 'NY', 'VT') THEN CONCAT('0', address_zip)
+-- MAGIC                 WHEN LENGTH(address_zip) IN (3, 7) AND address_state IN ('PR', 'VI') THEN CONCAT('00', address_zip)
+-- MAGIC                 WHEN LENGTH(SUBSTRING(address_zip, 1, 5)) < 5 AND address_state NOT IN ('NJ', 'AE', 'MA', 'ME', 'NH', 'RI', 'CT', 'NY', 'VT', 'PR', 'VI') OR address_state IS NULL THEN NULL
+-- MAGIC                 ELSE LEFT(address_zip, 5)
+-- MAGIC             END AS ZIP,
+-- MAGIC             -- Perform string concatenation based on specific conditions for 'COUNTY_FIPS' column (FACILITY_MASTER)
+-- MAGIC             CASE
+-- MAGIC                 WHEN LENGTH(county_code) = 4 AND address_state IN ('AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT') THEN CONCAT('0', county_code)
+-- MAGIC                 WHEN LENGTH(county_code) < 4 OR (LENGTH(county_code) = 4 AND address_state NOT IN ('AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT')) THEN NULL
+-- MAGIC                 ELSE county_code
+-- MAGIC             END AS COUNTY_CODE,
+-- MAGIC             ADDRESS_STATE,
+-- MAGIC             ADDRESS_CITY
+-- MAGIC         FROM {iisFACILITY_MASTER}) fm
+-- MAGIC         LEFT JOIN (
+-- MAGIC         SELECT
+-- MAGIC             -- Perform string concatenation based on specific conditions for 'ZIP' column (GEOCODING_ZIPCODES)
+-- MAGIC             CASE
+-- MAGIC                 WHEN LENGTH(zip) = 4 AND state IN ('NJ', 'AE', 'MA', 'ME', 'NH', 'RI', 'CT', 'NY', 'VT') THEN CONCAT('0', zip)
+-- MAGIC                 WHEN LENGTH(zip) = 3 AND state IN ('PR', 'VI') THEN CONCAT('00', zip)
+-- MAGIC                 WHEN LENGTH(zip) < 5 AND state NOT IN ('NJ', 'AE', 'MA', 'ME', 'NH', 'RI', 'CT', 'NY', 'VT', 'PR', 'VI') THEN NULL
+-- MAGIC                 ELSE LEFT(zip, 5)
+-- MAGIC             END AS ZIP,
+-- MAGIC             -- Perform string concatenation based on specific conditions for 'COUNTY_FIPS' column (GEOCODING_ZIPCODES)
+-- MAGIC             CASE
+-- MAGIC                 WHEN LENGTH(county_fips) = 4 AND state IN ('AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT') THEN CONCAT('0', county_fips)
+-- MAGIC                 WHEN LENGTH(county_fips) < 4 OR (LENGTH(county_fips) = 4 AND state NOT IN ('AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT')) THEN NULL
+-- MAGIC                 ELSE county_fips
+-- MAGIC             END AS COUNTY_FIPS,
+-- MAGIC             STATE,
+-- MAGIC             CITY
+-- MAGIC         FROM {iisGEOCODING_ZIPCODES}) cf
+-- MAGIC         ON fm.zip = cf.zip
+-- MAGIC ''')
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC #### Patient Phone Number Subquery
+-- MAGIC Serves to acquire and format the most recent patient phone information.
+
+-- COMMAND ----------
+
+DROP TABLE IF EXISTS PAT_PHONE
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC
+-- MAGIC spark.sql(f'''
+-- MAGIC   CACHE LAZY TABLE PAT_PHONE
+-- MAGIC     SELECT 
+-- MAGIC         DISTINCT * 
+-- MAGIC     FROM 
+-- MAGIC         (SELECT 
+-- MAGIC             DISTINCT pt.asiis_pat_id_ptr,
+-- MAGIC             pt.address_phone,
+-- MAGIC             Row_number() OVER(partition BY pt.asiis_pat_id_ptr ORDER BY pt.update_stamp DESC, sha2(concat_ws("|", COALESCE(cast(pt.asiis_pat_id_ptr As STRING),  ''), COALESCE(pt.address_phone,  '')), 256) ) AS RECORD
+-- MAGIC         FROM
+-- MAGIC             (SELECT 
+-- MAGIC                 DISTINCT asiis_pat_id_ptr,
+-- MAGIC                 REGEXP_REPLACE(PHONE_NUMBER, '[^0-9A-Za-z]', '') AS address_phone,
+-- MAGIC                 update_stamp
+-- MAGIC             FROM   
+-- MAGIC                 {iisPHONE_RESERVE}
+-- MAGIC             WHERE  
+-- MAGIC                 insert_stamp IS NOT NULL
+-- MAGIC
+-- MAGIC             UNION
+-- MAGIC
+-- MAGIC             SELECT 
+-- MAGIC                 DISTINCT asiis_pat_id_ptr,
+-- MAGIC                 address_phone,
+-- MAGIC                 update_stamp
+-- MAGIC             FROM   
+-- MAGIC                 {iisPATIENT_RESERVE}
+-- MAGIC             WHERE  
+-- MAGIC                 address_phone IS NOT NULL
+-- MAGIC                 AND LENGTH(address_phone) >= 10) pt) AA
+-- MAGIC         WHERE record = 1
+-- MAGIC ''')
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC #### Address At Time Of Vaccination Subquery
+-- MAGIC Serves to get the patient address at the time of the vaccination (rather than the most recently updated information)
+
+-- COMMAND ----------
+
+DROP TABLE IF EXISTS ADDRESS_ATO_VAX
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC #address_reserve_cols = [f"COALESCE(A.{col}, '')" for col in sql(f"SELECT * FROM delta.`{ADDRESS_RESERVE}` LIMIT 1").columns]
+-- MAGIC
+-- MAGIC spark.sql(f'''
+-- MAGIC   CACHE LAZY TABLE ADDRESS_ATO_VAX
+-- MAGIC     SELECT 
+-- MAGIC         AR.asiis_pat_id_ptr,
+-- MAGIC         AR.address_street1,
+-- MAGIC         AR.address_street2,
+-- MAGIC         AR.address_city,
+-- MAGIC         COALESCE(AR.address_state, GZ.state) AS STATE,
+-- MAGIC         CASE
+-- MAGIC           WHEN ( AR.county_code IS NULL OR AR.county_code = '0' ) THEN GZ.county_fips
+-- MAGIC           ELSE AR.county_code
+-- MAGIC         END AS COUNTY_FIPS,
+-- MAGIC         AR.address_zip,
+-- MAGIC         AR.address_country_code,
+-- MAGIC         AR.EVENT_ADDRESS_ASSOCIATOR
+-- MAGIC       --AR.IWEB_VACC_EVENT_ID
+-- MAGIC         FROM (
+-- MAGIC         SELECT * FROM    
+-- MAGIC             (
+-- MAGIC             select 
+-- MAGIC                 v.ASIIS_PAT_ID_PTR,
+-- MAGIC             -- v.IWEB_VACC_EVENT_ID,
+-- MAGIC             -- v.insert_stamp vaccine_stamp,
+-- MAGIC             -- a.insert_stamp address_stamp, 
+-- MAGIC                 a.ADDRESS_STREET1,
+-- MAGIC                 ADDRESS_STREET2,
+-- MAGIC                 ADDRESS_CITY,
+-- MAGIC                 ADDRESS_STATE,
+-- MAGIC                 -- Perform string concatenation based on specific conditions for 'COUNTY_FIPS' column (ADDRESS_RESERVE)
+-- MAGIC                 CASE
+-- MAGIC                     WHEN LENGTH(county_code) = 4 AND address_state IN ('AL','AK','AZ','AR','CA','CO','CT') THEN CONCAT('0', county_code)
+-- MAGIC                     WHEN LENGTH(county_code) < 4 OR (LENGTH(county_code) = 4 AND address_state NOT IN ( 'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT' ) ) THEN NULL
+-- MAGIC                     ELSE LEFT(county_code, 5)
+-- MAGIC                 END AS COUNTY_CODE,
+-- MAGIC                 -- Perform string concatenation based on specific conditions for 'ADDRESS_ZIP' column (ADDRESS_RESERVE)
+-- MAGIC                 CASE
+-- MAGIC                     WHEN LENGTH(replace(address_zip,'.','')) IN ( 4, 8 ) AND address_state IN ('NJ','AE','MA','ME','NH','RI','CT','NY','VT') THEN CONCAT('0', LEFT(address_zip, 4))
+-- MAGIC                     WHEN LENGTH(replace(address_zip,'.','')) IN ( 3, 7 ) AND address_state IN ( 'PR', 'VI' ) THEN CONCAT('00', LEFT(address_zip, 3))
+-- MAGIC                     --Added for cases where state is null *** 
+-- MAGIC                     WHEN LENGTH(replace(address_zip,'.','')) < 5 AND address_state NOT IN ( 'NJ', 'AE', 'MA', 'ME', 'NH', 'RI', 'CT', 'NY', 'VT', 'PR', 'VI' ) OR address_state IS NULL THEN NULL
+-- MAGIC                     ELSE LEFT(address_zip,5)
+-- MAGIC                 END AS ADDRESS_ZIP,
+-- MAGIC                 ADDRESS_COUNTRY_CODE,
+-- MAGIC                 concat(
+-- MAGIC                   v.asiis_vacc_code,
+-- MAGIC                   v.vacc_date) EVENT_ADDRESS_ASSOCIATOR,
+-- MAGIC                 ROW_NUMBER() OVER (PARTITION BY V.asiis_pat_id_ptr,v.asiis_vacc_code,v.vacc_date ORDER BY datediff(v.vacc_date, A.insert_stamp) ASC NULLS LAST, address_id) EVENT_RANK,
+-- MAGIC                 datediff(v.insert_stamp, a.insert_stamp) EVENT_DATEDIFF                
+-- MAGIC             FROM {iisVACCINATION_MASTER} v 
+-- MAGIC             LEFT JOIN {iisVACCINE_FAMILY} vf on v.asiis_vacc_code = vf.asiis_vacc_code
+-- MAGIC             LEFT JOIN {iisADDRESS_RESERVE} a ON v.asiis_pat_id_ptr = a.asiis_pat_id_ptr
+-- MAGIC             WHERE 
+-- MAGIC                 datediff(v.VACC_DATE, a.insert_stamp) >= -1
+-- MAGIC                 AND 
+-- MAGIC                 (address_zip IS NOT NULL
+-- MAGIC                 OR 
+-- MAGIC                 ( county_code IS NOT NULL AND county_code != 0 ))
+-- MAGIC     
+-- MAGIC     UNION
+-- MAGIC           select 
+-- MAGIC                 A.ASIIS_PAT_ID_PTR,
+-- MAGIC             --  v.IWEB_VACC_EVENT_ID,
+-- MAGIC             --  v.insert_stamp vaccine_stamp,
+-- MAGIC             --  a.insert_stamp address_stamp, 
+-- MAGIC                 a.ADDRESS_STREET1,
+-- MAGIC                 ADDRESS_STREET2,
+-- MAGIC                 ADDRESS_CITY,
+-- MAGIC                 ADDRESS_STATE,
+-- MAGIC                 -- Perform string concatenation based on specific conditions for 'COUNTY_FIPS' column (ADDRESS_RESERVE)
+-- MAGIC                 CASE
+-- MAGIC                     WHEN LENGTH(county_code) = 4 AND address_state IN ('AL','AK','AZ','AR','CA','CO','CT') THEN CONCAT('0', county_code)
+-- MAGIC                     WHEN LENGTH(county_code) < 4 OR (LENGTH(county_code) = 4 AND address_state NOT IN ( 'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT' ) ) THEN NULL
+-- MAGIC                     ELSE LEFT(county_code, 5)
+-- MAGIC                 END AS COUNTY_CODE,
+-- MAGIC                 -- Perform string concatenation based on specific conditions for 'ADDRESS_ZIP' column (ADDRESS_RESERVE)
+-- MAGIC                 CASE
+-- MAGIC                     WHEN LENGTH(replace(address_zip,'.','')) IN ( 4, 8 ) AND address_state IN ('NJ','AE','MA','ME','NH','RI','CT','NY','VT')  THEN CONCAT('0', LEFT(address_zip, 4))
+-- MAGIC                     WHEN LENGTH(replace(address_zip,'.','')) IN ( 3, 7 ) AND address_state IN ( 'PR', 'VI' )  THEN CONCAT('00', LEFT(address_zip,3))
+-- MAGIC                     --Added for cases where state is null *** 
+-- MAGIC                     WHEN LENGTH(replace(address_zip,'.','')) < 5 AND address_state NOT IN ( 'NJ', 'AE', 'MA', 'ME', 'NH', 'RI', 'CT', 'NY', 'VT', 'PR', 'VI' ) OR address_state IS NULL THEN NULL
+-- MAGIC                     ELSE LEFT(address_zip, 5)
+-- MAGIC                 END AS ADDRESS_ZIP,
+-- MAGIC                 ADDRESS_COUNTRY_CODE,  
+-- MAGIC                 concat(
+-- MAGIC                   CR.asiis_vacc_code,
+-- MAGIC                   CR.INSERT_STAMP) EVENT_ADDRESS_ASSOCIATOR,
+-- MAGIC                 ROW_NUMBER() OVER (PARTITION BY CR.asiis_pat_id_ptr,cr.asiis_vacc_code,cr.insert_STAMP ORDER BY datediff(cr.insert_STAMP, A.insert_stamp) ASC NULLS LAST, address_id) EVENT_RANK,
+-- MAGIC                 datediff(cr.insert_stamp, a.insert_stamp) EVENT_DATEDIFF
+-- MAGIC             FROM {iisADDRESS_RESERVE} a 
+-- MAGIC             LEFT JOIN {iisPATIENT_CONTRA_RESERVE} cr on cr.asiis_pat_id_ptr = a.asiis_pat_id_ptr
+-- MAGIC             LEFT JOIN {iisVACCINE_FAMILY} vf on CR.asiis_vacc_code = vf.asiis_vacc_code
+-- MAGIC             WHERE 
+-- MAGIC                 datediff(CR.insert_stamp, a.insert_stamp) >= 0
+-- MAGIC                 AND 
+-- MAGIC                 (address_zip IS NOT NULL
+-- MAGIC                 OR 
+-- MAGIC                 ( county_code IS NOT NULL AND county_code != 0 ))
+-- MAGIC       
+-- MAGIC       UNION          
+-- MAGIC           
+-- MAGIC           select 
+-- MAGIC                 A.ASIIS_PAT_ID_PTR,
+-- MAGIC             -- v.IWEB_VACC_EVENT_ID,
+-- MAGIC             -- v.insert_stamp vaccine_stamp,
+-- MAGIC             -- a.insert_stamp address_stamp, 
+-- MAGIC                 a.ADDRESS_STREET1,
+-- MAGIC                 ADDRESS_STREET2,
+-- MAGIC                 ADDRESS_CITY,
+-- MAGIC                 ADDRESS_STATE,
+-- MAGIC                 -- Perform string concatenation based on specific conditions for 'COUNTY_FIPS' column (ADDRESS_RESERVE)
+-- MAGIC                 CASE
+-- MAGIC                     WHEN LENGTH(county_code) = 4 AND address_state IN ('AL','AK','AZ','AR','CA','CO','CT') THEN CONCAT('0', county_code)
+-- MAGIC                     WHEN LENGTH(county_code) < 4 OR (LENGTH(county_code) = 4 AND address_state NOT IN ( 'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT' ) ) THEN NULL
+-- MAGIC                     ELSE LEFT(county_code, 5)
+-- MAGIC                 END AS COUNTY_CODE,
+-- MAGIC                 -- Perform string concatenation based on specific conditions for 'ADDRESS_ZIP' column (ADDRESS_RESERVE)
+-- MAGIC                 CASE
+-- MAGIC                     WHEN LENGTH(replace(address_zip,'.','')) IN ( 4, 8 ) AND address_state IN ('NJ','AE','MA','ME','NH','RI','CT','NY','VT') THEN CONCAT('0', LEFT(address_zip, 4))
+-- MAGIC                     WHEN LENGTH(replace(address_zip,'.','')) IN ( 3, 7 ) AND address_state IN ( 'PR', 'VI' ) THEN CONCAT('00', LEFT(address_zip, 3))
+-- MAGIC                      --Added for cases where state is null *** 
+-- MAGIC                     WHEN LENGTH(replace(address_zip,'.','')) < 5 AND address_state NOT IN ( 'NJ', 'AE', 'MA', 'ME', 'NH', 'RI', 'CT', 'NY', 'VT', 'PR', 'VI' ) OR address_state IS NULL THEN NULL
+-- MAGIC                     ELSE LEFT(address_zip, 5)
+-- MAGIC                 END AS ADDRESS_ZIP,
+-- MAGIC                 ADDRESS_COUNTRY_CODE,
+-- MAGIC                 concat(
+-- MAGIC                   D.asiis_vacc_code,
+-- MAGIC                   D.DEFERRAL_DATE) EVENT_ADDRESS_ASSOCIATOR,
+-- MAGIC                 ROW_NUMBER() OVER (PARTITION BY D.asiis_pat_id_ptr,d.asiis_vacc_code,d.deferral_date ORDER BY datediff(D.DEFERRAL_DATE, A.insert_stamp) ASC NULLS LAST, address_id) EVENT_RANK, 
+-- MAGIC                 datediff(d.deferral_date, a.insert_stamp) EVENT_DATEDIFF
+-- MAGIC             FROM {iisADDRESS_RESERVE} a 
+-- MAGIC             LEFT JOIN {iisPATIENT_VACCINE_DEFERRAL} d on d.asiis_pat_id_ptr = a.asiis_pat_id_ptr
+-- MAGIC             LEFT JOIN {iisVACCINE_FAMILY} vf on d.asiis_vacc_code = vf.asiis_vacc_code
+-- MAGIC             WHERE 
+-- MAGIC                 datediff(D.DEFERRAL_DATE, a.insert_stamp) >= 0
+-- MAGIC                 AND 
+-- MAGIC                 (address_zip IS NOT NULL
+-- MAGIC                 OR 
+-- MAGIC                 ( county_code IS NOT NULL AND county_code != 0 ))
+-- MAGIC             
+-- MAGIC
+-- MAGIC )
+-- MAGIC        WHERE EVENT_RANK = 1
+-- MAGIC        ORDER BY ASIIS_PAT_ID_PTR) AR
+-- MAGIC         
+-- MAGIC         LEFT JOIN (
+-- MAGIC                   SELECT
+-- MAGIC                   -- Perform string concatenation based on specific conditions for 'ADDRESS_ZIP' column (GEOCODING_ZIPCODES)
+-- MAGIC                       CASE 
+-- MAGIC                         WHEN LENGTH(zip) = 4 AND state IN ('NJ', 'AE', 'MA', 'ME', 'NH', 'RI', 'CT', 'NY', 'VT')THEN CONCAT('0', zip)
+-- MAGIC                         WHEN LENGTH(zip) = 3 AND state IN ( 'PR', 'VI' )THEN CONCAT('00', zip)
+-- MAGIC                         WHEN LENGTH(zip) < 5 AND state NOT IN ( 'NJ', 'AE', 'MA', 'ME', 'NH', 'RI', 'CT', 'NY', 'VT', 'PR', 'VI' ) THEN NULL
+-- MAGIC                         ELSE LEFT(zip,5)
+-- MAGIC                       END AS ZIP,
+-- MAGIC                     -- Perform string concatenation based on specific conditions for 'COUNTY_FIPS' column (GEOCODING_ZIPCODES)
+-- MAGIC                       CASE
+-- MAGIC                         WHEN LENGTH(county_fips) = 4 AND state IN ( 'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT' ) THEN CONCAT('0', county_fips)
+-- MAGIC                         WHEN LENGTH(county_fips) < 4 OR (LENGTH(county_fips) = 4 AND state NOT IN ( 'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT' )) THEN NULL
+-- MAGIC                         ELSE LEFT(county_fips, 5)
+-- MAGIC                       END AS COUNTY_FIPS,
+-- MAGIC                       STATE
+-- MAGIC                   FROM
+-- MAGIC                       {iisGEOCODING_ZIPCODES}) GZ 
+-- MAGIC         ON AR.ADDRESS_ZIP = GZ.ZIP
+-- MAGIC ''')
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC #### Cleansed Patient Master Subquery
+-- MAGIC Standardizing the zipcode and countycode format.
+
+-- COMMAND ----------
+
+DROP TABLE IF EXISTS PAT_MASTER
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC spark.sql(f'''
+-- MAGIC   CACHE LAZY TABLE PAT_MASTER
+-- MAGIC     SELECT 
+-- MAGIC         DISTINCT asiis_pat_id,
+-- MAGIC         pat_first_name,
+-- MAGIC         pat_middle_name,
+-- MAGIC         pat_last_name,
+-- MAGIC         pat_birth_date,
+-- MAGIC         pat_gender,
+-- MAGIC         pat_ethnicity_code,
+-- MAGIC         pat_language,  
+-- MAGIC         address_email,
+-- MAGIC         address_street1,
+-- MAGIC         address_street2,
+-- MAGIC         address_city,
+-- MAGIC         address_state,
+-- MAGIC         COALESCE(PM.address_state, GZ.state) AS STATE,
+-- MAGIC         address_zip,
+-- MAGIC         CASE
+-- MAGIC           WHEN ( PM.county_code IS NULL OR PM.county_code = '0' ) THEN GZ.county_fips
+-- MAGIC           ELSE PM.county_code
+-- MAGIC         END AS COUNTY_FIPS,
+-- MAGIC         ADDRESS_COUNTRY_CODE
+-- MAGIC     FROM(
+-- MAGIC         SELECT 
+-- MAGIC                 asiis_pat_id,
+-- MAGIC                 address_street1,
+-- MAGIC                 address_street2,
+-- MAGIC                 address_city,
+-- MAGIC                 address_state,
+-- MAGIC                 -- Perform string concatenation based on specific conditions for 'COUNTY_FIPS' column (ADDRESS_RESERVE)
+-- MAGIC                 CASE
+-- MAGIC                   WHEN LENGTH(county_code) = 4 AND address_state IN ('AL','AK','AZ','AR','CA','CO','CT') THEN CONCAT('0', county_code)
+-- MAGIC                   WHEN LENGTH(county_code) < 4 OR (LENGTH(county_code) = 4 AND address_state NOT IN ( 'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT' ) ) THEN NULL
+-- MAGIC                   ELSE LEFT(county_code, 5)
+-- MAGIC                 END AS COUNTY_CODE,
+-- MAGIC                 -- Perform string concatenation based on specific conditions for 'ADDRESS_ZIP' column (ADDRESS_RESERVE)
+-- MAGIC                 CASE
+-- MAGIC                   WHEN LENGTH(address_zip) IN ( 4, 8 ) AND address_state IN ('NJ','AE','MA','ME','NH','RI','CT','NY','VT') THEN CONCAT('0', LEFT(address_zip,4))
+-- MAGIC                   WHEN LENGTH(address_zip) IN (3, 7) AND address_state IN ( 'PR', 'VI' ) THEN CONCAT('00', LEFT(address_zip, 3))
+-- MAGIC                   --Added for cases where state is null *** 
+-- MAGIC                   WHEN LENGTH(address_zip) < 5 AND address_state NOT IN ( 'NJ', 'AE', 'MA', 'ME', 'NH', 'RI', 'CT', 'NY', 'VT', 'PR', 'VI' ) OR address_state IS NULL THEN NULL
+-- MAGIC                   ELSE LEFT(address_zip, 5)
+-- MAGIC                 END AS ADDRESS_ZIP,
+-- MAGIC                 ADDRESS_COUNTRY_CODE,
+-- MAGIC                 pat_first_name,
+-- MAGIC                 pat_middle_name,
+-- MAGIC                 pat_last_name,
+-- MAGIC                 pat_birth_date,
+-- MAGIC                 pat_gender,
+-- MAGIC                 pat_ethnicity_code,
+-- MAGIC                 pat_language,  
+-- MAGIC                 address_email      
+-- MAGIC      FROM   
+-- MAGIC                 {iisPATIENT_MASTER} 
+-- MAGIC             WHERE  
+-- MAGIC                 address_zip IS NOT NULL
+-- MAGIC                 OR ( county_code IS NOT NULL
+-- MAGIC                 AND county_code != 0 )) PM
+-- MAGIC         LEFT JOIN (
+-- MAGIC           SELECT
+-- MAGIC           -- Perform string concatenation based on specific conditions for 'ADDRESS_ZIP' column (GEOCODING_ZIPCODES)
+-- MAGIC             CASE 
+-- MAGIC               WHEN LENGTH(zip) = 4 AND state IN ('NJ', 'AE', 'MA', 'ME', 'NH', 'RI', 'CT', 'NY', 'VT') THEN CONCAT('0', zip)
+-- MAGIC               WHEN LENGTH(zip) = 3 AND state IN ('PR', 'VI') THEN CONCAT('00', zip)
+-- MAGIC               WHEN LENGTH(zip) < 5 AND state NOT IN ('NJ', 'AE', 'MA', 'ME', 'NH', 'RI', 'CT', 'NY', 'VT', 'PR', 'VI') THEN NULL
+-- MAGIC               ELSE LEFT(zip, 5)
+-- MAGIC             END AS ZIP,
+-- MAGIC             -- Perform string concatenation based on specific conditions for 'COUNTY_FIPS' column (GEOCODING_ZIPCODES)
+-- MAGIC             CASE
+-- MAGIC               WHEN LENGTH(county_fips) = 4 AND state IN ('AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT') THEN CONCAT('0', county_fips)
+-- MAGIC               WHEN LENGTH(county_fips) < 4 OR (LENGTH(county_fips) = 4 AND state NOT IN ('AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT')) THEN NULL
+-- MAGIC               ELSE LEFT(county_fips, 5)
+-- MAGIC              END AS COUNTY_FIPS,
+-- MAGIC             STATE
+-- MAGIC           FROM
+-- MAGIC               {iisGEOCODING_ZIPCODES}) GZ 
+-- MAGIC         ON PM.ADDRESS_ZIP = GZ.ZIP
+-- MAGIC ''')
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC Query Vaccinations
+
+-- COMMAND ----------
+
+DROP TABLE IF EXISTS AllVaxEventTable
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC spark.sql(f'''CREATE OR REPLACE TEMPORARY VIEW AllVaxEventTable AS
+-- MAGIC     select distinct         REPLACE(CONCAT('WA', 
+-- MAGIC                    'V',
+-- MAGIC                    COALESCE(CAST(pm.asiis_pat_id AS STRING), ''),
+-- MAGIC                    COALESCE(CAST(vm.asiis_vacc_code AS STRING), ''),
+-- MAGIC                    COALESCE(CAST(LEFT(REPLACE(vm.vacc_date,'-',''),8) AS STRING), ''),
+-- MAGIC                    COALESCE(CAST(vm.last_irms_sys_id_to_update AS STRING), ''),
+-- MAGIC                    COALESCE(CAST(vf.family_code AS STRING), '')),
+-- MAGIC              Char(9), '')                                                                                            VACC_EVENT_ID,
+-- MAGIC     CAST(i.irms_sys_id AS DOUBLE)                                                                                     IRMS_SYS_ID,
+-- MAGIC     CAST(fm.asiis_fac_id AS DOUBLE)                                                                                   ASIIS_FAC_ID,
+-- MAGIC     CAST(vm.asiis_vacc_code AS DOUBLE)  
+-- MAGIC     Asiis_Vacc_Code,
+-- MAGIC     --'D'                                                                                                              ExtractType,
+-- MAGIC     --''                                                                                                               PPRLGeneratedID,
+-- MAGIC     CAST(pm.asiis_pat_id AS DOUBLE)                                                                                  ASIIS_PAT_ID,
+-- MAGIC     pm.pat_first_name                                                                                                PAT_FIRST_NAME,
+-- MAGIC     pm.pat_middle_name                                                                                               PAT_MIDDLE_NAME,
+-- MAGIC     pm.pat_last_name                                                                                                 PAT_LAST_NAME,
+-- MAGIC     to_date(pm.pat_birth_date,'yyyy-MM-dd')                                                                          PAT_BIRTH_DATE,
+-- MAGIC     pm.pat_gender                                                                                                    PAT_GENDER,
+-- MAGIC     REPLACE(pz.address_street1, Char(9), '')                                                                         PAT_ADDRESS_STREET1, 
+-- MAGIC     REPLACE(pz.address_street2, Char(9), '')                                                                         PAT_ADDRESS_STREET2,
+-- MAGIC     REPLACE(pz.address_city, Char(9), '')                                                                            PAT_ADDRESS_CITY,
+-- MAGIC     COALESCE(pz.county_fips,pma.county_fips)                                                                          PAT_COUNTY_CODE,
+-- MAGIC     COALESCE(pz.state, pma.state)                                                                             PAT_ADDRESS_STATE,
+-- MAGIC     COALESCE(pz.address_zip,pma.address_zip)                                                                          PAT_ADDRESS_ZIP,
+-- MAGIC
+-- MAGIC     REPLACE(AAV.ADDRESS_STREET1, CHAR(9),'')                                                                         ATO_PAT_ADDRESS_STREET1,
+-- MAGIC     REPLACE(AAV.ADDRESS_STREET2, CHAR(9),'')                                                                         ATO_PAT_ADDRESS_STREET2,
+-- MAGIC     REPLACE(AAV.ADDRESS_CITY, CHAR(9),'')                                                                            ATO_PAT_ADDRESS_CITY,
+-- MAGIC     COALESCE(AAV.county_fips,pma.county_fips)                                                                         ATO_PAT_COUNTY_CODE,
+-- MAGIC     COALESCE(AAV.state, pma.state)                                                                            ATO_PAT_ADDRESS_STATE,
+-- MAGIC     COALESCE(AAV.address_zip, pma.address_zip)                                                                         ATO_PAT_ADDRESS_ZIP,
+-- MAGIC      --CASE
+-- MAGIC         --WHEN mr.`1` = '5' THEN '1002-5'
+-- MAGIC         --WHEN mr.`1` = '4' THEN '2028-9'
+-- MAGIC         --WHEN mr.`1` = '7' THEN '2076-8'
+-- MAGIC         --WHEN mr.`1` = '2' THEN '2054-5'
+-- MAGIC         --WHEN mr.`1` = '1' THEN '2106-3'
+-- MAGIC         --WHEN mr.`1` = '6' THEN '2131-1'
+-- MAGIC         --WHEN mr.`1` = '8' THEN '2131-1'
+-- MAGIC         --WHEN mr.`1` = '9' THEN 'UNK'
+-- MAGIC         --ELSE 'UNK'
+-- MAGIC   --  END                                                                                                             RecipientRace1,
+-- MAGIC     --CASE
+-- MAGIC        --WHEN mr.`2` = '5' THEN '1002-5'
+-- MAGIC        --WHEN mr.`2` = '4' THEN '2028-9'
+-- MAGIC        --WHEN mr.`2` = '7' THEN '2076-8'
+-- MAGIC        --WHEN mr.`2` = '2' THEN '2054-5'
+-- MAGIC        --WHEN mr.`2` = '1' THEN '2106-3'
+-- MAGIC        --WHEN mr.`2` = '6' THEN '2131-1'
+-- MAGIC        --WHEN mr.`2` = '8' THEN '2131-1'
+-- MAGIC        --WHEN mr.`2` = '9' THEN 'UNK'
+-- MAGIC        --ELSE NULL
+-- MAGIC    -- END                                                                                                             RecipientRace2,
+-- MAGIC     --CASE
+-- MAGIC        --WHEN mr.`3` = '5' THEN '1002-5'
+-- MAGIC        --WHEN mr.`3` = '4' THEN '2028-9'
+-- MAGIC        --WHEN mr.`3` = '7' THEN '2076-8'
+-- MAGIC        --WHEN mr.`3` = '2' THEN '2054-5'
+-- MAGIC        --WHEN mr.`3` = '1' THEN '2106-3'
+-- MAGIC        --WHEN mr.`3` = '6' THEN '2131-1'
+-- MAGIC        --WHEN mr.`3` = '8' THEN '2131-1'
+-- MAGIC        --WHEN mr.`3` = '9' THEN 'UNK'
+-- MAGIC        --ELSE NULL
+-- MAGIC     --END                                                                                                             RecipientRace3,
+-- MAGIC     --CASE
+-- MAGIC         --WHEN mr.`4` = '5' THEN '1002-5'
+-- MAGIC         --WHEN mr.`4` = '4' THEN '2028-9'
+-- MAGIC         --WHEN mr.`4` = '7' THEN '2076-8'
+-- MAGIC         --WHEN mr.`4` = '2' THEN '2054-5'
+-- MAGIC         --WHEN mr.`4` = '1' THEN '2106-3'
+-- MAGIC         --WHEN mr.`4` = '6' THEN '2131-1'
+-- MAGIC         --WHEN mr.`4` = '8' THEN '2131-1'
+-- MAGIC         --WHEN mr.`4` = '9' THEN 'UNK'
+-- MAGIC         --ELSE NULL
+-- MAGIC     --END                                                                                                             RecipientRace4,
+-- MAGIC     --CASE
+-- MAGIC         --WHEN mr.`5` = '5' THEN '1002-5'
+-- MAGIC         --WHEN mr.`5` = '4' THEN '2028-9'
+-- MAGIC         --WHEN mr.`5` = '7' THEN '2076-8'
+-- MAGIC         --WHEN mr.`5` = '2' THEN '2054-5'
+-- MAGIC         --WHEN mr.`5` = '1' THEN '2106-3'
+-- MAGIC         --WHEN mr.`5` = '6' THEN '2131-1'
+-- MAGIC         --WHEN mr.`5` = '8' THEN '2131-1'
+-- MAGIC         --WHEN mr.`5` = '9' THEN 'UNK'
+-- MAGIC         --ELSE NULL
+-- MAGIC     --END                                                                                                            RecipientRace5,
+-- MAGIC     --CASE
+-- MAGIC         --WHEN mr.`6` = '5' THEN '1002-5'
+-- MAGIC         --WHEN mr.`6` = '4' THEN '2028-9'
+-- MAGIC         --WHEN mr.`6` = '7' THEN '2076-8'
+-- MAGIC         --WHEN mr.`6` = '2' THEN '2054-5'
+-- MAGIC         --WHEN mr.`6` = '1' THEN '2106-3'
+-- MAGIC         --WHEN mr.`6` = '6' THEN '2131-1'
+-- MAGIC         --WHEN mr.`6` = '8' THEN '2131-1'
+-- MAGIC         --WHEN mr.`6` = '9' THEN 'UNK'
+-- MAGIC         --ELSE NULL
+-- MAGIC     --END                                                                                                           RecipientRace6,
+-- MAGIC     CAST(pm.pat_ethnicity_code AS string)                                                                                PAT_ETHNICITY_CODE,
+-- MAGIC     to_date(vm.vacc_date, 'yyyy-MM-dd')                                                                             VACC_DATE,
+-- MAGIC     CAST(vc.best_cdc_code AS DOUBLE)                                                                                BEST_CDC_CODE,
+-- MAGIC     m.ndc_number                                                                                                    NDC_CODE,
+-- MAGIC     vm.manu_code                                                                                                    MANU_CODE,
+-- MAGIC     REPLACE(vm.lot_num, Char(9), '')                                                                                LOT_NUM,
+-- MAGIC     to_date(ln.expiration_date,'yyyy-MM-dd')                                                                        EXPIRATION_DATE,
+-- MAGIC     CASE
+-- MAGIC         WHEN vm.anatomical_site = 'LEFT_THIGH' THEN 'LT'
+-- MAGIC         WHEN vm.anatomical_site = 'LEFT_ARM' THEN 'LA'
+-- MAGIC         WHEN vm.anatomical_site = 'LD' THEN 'LD'
+-- MAGIC         WHEN vm.anatomical_site = 'LEFT_GLUTEUS' THEN 'LG'
+-- MAGIC         WHEN vm.anatomical_site = 'LVL' THEN 'LVL'
+-- MAGIC         WHEN vm.anatomical_site = 'LLFA' THEN 'LLFA'
+-- MAGIC         WHEN vm.anatomical_site = 'RIGHT_THIGH' THEN 'RT'
+-- MAGIC         WHEN vm.anatomical_site = 'RIGHT_ARM' THEN 'RA'
+-- MAGIC         WHEN vm.anatomical_site = 'RD' THEN 'RD'
+-- MAGIC         WHEN vm.anatomical_site = 'RIGHT_GLUTEUS' THEN 'RG'
+-- MAGIC         WHEN vm.anatomical_site = 'RVL' THEN 'RVL'
+-- MAGIC         WHEN vm.anatomical_site = 'RLFA' THEN 'RLFA'
+-- MAGIC         ELSE NULL
+-- MAGIC     END                                                                                                             ANATOMICAL_SITE,
+-- MAGIC     CASE
+-- MAGIC         WHEN vm.anatomical_route = 'INTRAMUSCULAR' THEN 'C28161'
+-- MAGIC         WHEN vm.anatomical_route = 'INTRADERMAL' THEN 'C38238'
+-- MAGIC         WHEN vm.anatomical_route = 'INTRANASAL' THEN 'C38284'
+-- MAGIC         WHEN vm.anatomical_route = 'INTRAVENOUS' THEN 'C38276'
+-- MAGIC         WHEN vm.anatomical_route = 'IV' THEN 'C38276'
+-- MAGIC         WHEN vm.anatomical_route = 'ORAL' THEN 'C38288'
+-- MAGIC         WHEN vm.anatomical_route = 'SUBCATANEOUS' THEN 'C38299'
+-- MAGIC         WHEN vm.anatomical_route = 'TRANSDERMAL' THEN 'C38305'
+-- MAGIC         WHEN vm.anatomical_route IN ( 'C28161', 'C38238', 'C38284', 'C38276',
+-- MAGIC                                  'C38288', 'C38299', 'C38305' ) THEN vm.anatomical_route
+-- MAGIC         ELSE NULL
+-- MAGIC     END                                                                                                             ANATOMICAL_ROUTE,
+-- MAGIC         CASE
+-- MAGIC         WHEN ( vv.valid_vacc = 'N' OR iv.invalid_reason_code IS NOT NULL ) THEN 'INV'
+-- MAGIC         WHEN ( vv.valid_vacc IS NULL OR vv.dose_number IS NULL ) THEN 'UNK'
+-- MAGIC         ELSE CAST(vv.dose_number AS STRING)
+-- MAGIC     END                                                                                                             DOSE_NUMBER,
+-- MAGIC     CASE
+-- MAGIC         WHEN ( vv.series_complete = 'Y' OR iv.series_complete = 'Y' ) THEN 'YES'
+-- MAGIC         WHEN ( vv.series_complete = 'N' OR iv.series_complete = 'N' ) THEN 'NO'
+-- MAGIC         WHEN ( vv.series_complete IS NULL AND iv.series_complete IS NULL ) THEN 'UNK'
+-- MAGIC         ELSE 'UNK'
+-- MAGIC     END                                                                                                             SERIES_COMPLETE,
+-- MAGIC     vf.family_code                                                                                                  FAMILY_CODE,
+-- MAGIC     COALESCE(Replace(i.NAME, Char(9), ''), Replace(fm.NAME, Char(9), ''))                                           ORG_NAME,
+-- MAGIC     COALESCE(Replace(fm.NAME, Char(9), ''), Replace(i.NAME, Char(9), ''))                                           FAC_NAME,
+-- MAGIC     COALESCE(fm.pin, i.pin)                                                                                         VFC_PIN,
+-- MAGIC     CASE
+-- MAGIC         WHEN fm.provider_facility_type = 'PRIVATE_PRIVATE_HOSPITAL'                      THEN '9'
+-- MAGIC         WHEN fm.provider_facility_type = 'PRIVATE_PRIVATE_PRACTICE_SOLO_GROUP_HMO'       THEN '12'
+-- MAGIC         WHEN fm.provider_facility_type = 'PRIVATE_PRIVATE_PRACTICE_SOLO_GROUPS_AS_AGENT' THEN '12'
+-- MAGIC         WHEN fm.provider_facility_type = 'PRIVATE_COMMUNITY_HEALTH_CENTER'               THEN '3'
+-- MAGIC         WHEN fm.provider_facility_type = 'PRIVATE_PHARMACY'                              THEN '17'
+-- MAGIC         WHEN fm.provider_facility_type = 'PRIVATE_BIRTHING_HOSPITAL'                     THEN '9'
+-- MAGIC         WHEN fm.provider_facility_type = 'PRIVATE_SCHOOL_BASED_CLINIC'                   THEN '1'
+-- MAGIC         WHEN fm.provider_facility_type = 'PRIVATE_TEEN_HEALTH_CENTER'                    THEN '16'
+-- MAGIC         WHEN fm.provider_facility_type = 'PRIVATE_ADOLESCENT_ONLY_PROVIDER'              THEN '16'
+-- MAGIC         WHEN fm.provider_facility_type = 'PUBLIC_PUBLIC_HEALTH_DEPARTMENT_CLINIC'        THEN '19'
+-- MAGIC         WHEN fm.provider_facility_type = 'PUBLIC_PUBLIC_HEALTH_DEPARTMENT_CLINIC_AGENT'  THEN '19'
+-- MAGIC         WHEN fm.provider_facility_type = 'PUBLIC_PUBLIC_HOSPITAL'                        THEN '9'
+-- MAGIC         WHEN fm.provider_facility_type = 'PUBLIC_FQHC_RCH_COMMUNITY_MIGRANT_RURAL'       THEN '20'
+-- MAGIC         WHEN fm.provider_facility_type = 'PUBLIC_COMMUNITY_HEALTH_CENTER'                THEN '3'
+-- MAGIC         WHEN fm.provider_facility_type = 'PUBLIC_TRIBAL_INDIAN_HEALTH_SERVICES_CLINIC'   THEN '11'
+-- MAGIC         WHEN fm.provider_facility_type = 'PUBLIC_WOMAN_INFANTS_CHILDREN'                 THEN '19'
+-- MAGIC         WHEN fm.provider_facility_type = 'PUBLIC_STD_HIV'                                THEN '6'
+-- MAGIC         WHEN fm.provider_facility_type = 'PUBLIC_FAMILY_PLANNING'                        THEN '19'
+-- MAGIC         WHEN fm.provider_facility_type = 'PUBLIC_JUVENILE_DETENTION_CENTER'              THEN '2'
+-- MAGIC         WHEN fm.provider_facility_type = 'PUBLIC_CORRECTIONAL_FACILITY'                  THEN '2'
+-- MAGIC         WHEN fm.provider_facility_type = 'PUBLIC_DRUG_TREATMENT_FACILITY'                THEN '19'
+-- MAGIC         WHEN fm.provider_facility_type = 'PUBLIC_MIGRANT_HEALTH_FACILITY'                THEN '4'
+-- MAGIC         WHEN fm.provider_facility_type = 'PUBLIC_REFUGEE_HEALTH_FACILITY'                THEN '4'
+-- MAGIC         WHEN fm.provider_facility_type = 'PUBLIC_SCHOOL_BASED_CLINIC'                    THEN '7'
+-- MAGIC         WHEN fm.provider_facility_type = 'PUBLIC_TEEN_HEALTH_CENTER'                     THEN '19'
+-- MAGIC         WHEN fm.provider_facility_type = 'PUBLIC_ADOLESCENT_ONLY'                        THEN '19'
+-- MAGIC         WHEN fm.provider_facility_type = 'OTHER'                                         THEN '28'
+-- MAGIC         WHEN fm.provider_facility_type = 'PRIVATE'                                       THEN 'UNK'
+-- MAGIC         WHEN fm.provider_facility_type = 'HOSPITAL'                                      THEN '9'
+-- MAGIC         WHEN fm.provider_facility_type = 'FEDERAL QUALIFIED HEALTH CENTER'               THEN '20'
+-- MAGIC         WHEN fm.provider_facility_type = 'OTHER PUBLIC HEALTH'                           THEN '28'
+-- MAGIC         WHEN fm.provider_facility_type = 'OTHER IMMUNIZATIONS PROJECT'                   THEN '28'
+-- MAGIC         WHEN fm.provider_facility_type = 'PUBLIC HEALTH DEPARTMENTS'                     THEN '19'
+-- MAGIC         WHEN fm.provider_facility_type = 'Head Start'                                    THEN '28'
+-- MAGIC         WHEN fm.provider_facility_type = 'Child Care Center'                             THEN '28'
+-- MAGIC         WHEN fm.provider_facility_type = 'School'                                        THEN '28'
+-- MAGIC         WHEN fm.provider_facility_type = 'Public School'                                 THEN '28'
+-- MAGIC         WHEN fm.provider_facility_type = 'Private School'                                THEN '28'
+-- MAGIC         ELSE 'UNK'
+-- MAGIC     END                                                                                                             PROVIDER_FACILITY_TYPE,
+-- MAGIC     Replace(fm.address_street1, Char(9), '')                                                                        FAC_ADDRESS_STREET1,
+-- MAGIC     substr(Replace(fm.address_street2, Char(9), ''),1,25)                                                           FAC_ADDRESS_STREET2,
+-- MAGIC     fz.city                                                                                                         FAC_ADDRESS_CITY,
+-- MAGIC     fz.county_fips                                                                                                  FAC_ADDRESS_COUNTY_CODE,
+-- MAGIC     fz.state                                                                                                        FAC_ADDRESS_STATE,
+-- MAGIC     fz.zip                                                                                                          FAC_ADDRESS_ZIP,
+-- MAGIC     --'NO'                                                                                                            VACC_REFUSAL,
+-- MAGIC     --CASE
+-- MAGIC        /* WHEN pc.contra_code IN( 9, 15, 16, 19, 22, 23, 31, 43,
+-- MAGIC                                48, 53, 56, 58, 59, 97, 102, 106,
+-- MAGIC                                109, 116, 117, 118, 119 ) THEN 'YES'
+-- MAGIC         ELSE 'UNK'
+-- MAGIC     END                                                                                                            COMORBIDITY_STATUS,*/
+-- MAGIC    -- CASE
+-- MAGIC       --  WHEN ( pc.contra_code = 243
+-- MAGIC         --    OR ( sr.serology_type_code IN ( 56, 63 ) 
+-- MAGIC          --   AND sr.serology_result_id IN ( 50, 63 ))) THEN 'YES'
+-- MAGIC        -- WHEN ( sr.serology_type_code IN ( 56, 63 ) 
+-- MAGIC         --   AND sr.serology_result_id NOT IN ( 50, 63 ) ) THEN 'NO'
+-- MAGIC       --  ELSE 'UNK'
+-- MAGIC     --END                                                                                                             SEROLOGY_RESULTS,
+-- MAGIC     --to_date(sr.serology_draw_date,'yyyy-MM-dd')                                                                     SEROLOG_DRAW_DATE,
+-- MAGIC     --CAST(sr.serology_type_code AS DOUBLE)                                                                           SEROLOGY_TYPE_CODE,
+-- MAGIC     --CAST(sr.serology_result_id AS INT)                                                                              SEROLOGY_RESULT_ID,
+-- MAGIC     vm.historical                                                                                                   HISTORICAL,
+-- MAGIC     vm.insert_stamp                                                                                                 INSERT_STAMP,
+-- MAGIC     to_date(vr.registry_entry_stamp,'yyyy-MM-dd')                                                                   REGISTRY_ENTRY_STAMP,
+-- MAGIC     vr.reporting_method                                                                                             REPORTING_METHOD,
+-- MAGIC     CAST(vr.vfc_eligible AS DOUBLE)                                                                                 VFC_ELIGIBLE,
+-- MAGIC     vm.cc_volume                                                                                                    CC_VOLUME,                                                                                       
+-- MAGIC     mr.`1` AS PAT_RACE1,
+-- MAGIC     mr.`2` AS PAT_RACE2,
+-- MAGIC     mr.`3` AS PAT_RACE3,
+-- MAGIC     mr.`4` AS PAT_RACE4,
+-- MAGIC     mr.`5` AS PAT_RACE5,
+-- MAGIC     mr.`6` AS PAT_RACE6,
+-- MAGIC     pm.pat_language                                                                                                 PAT_LANGUAGE,
+-- MAGIC     pl.address_phone                                                                                                PAT_ADDRESS_PHONE,
+-- MAGIC     pm.address_email                                                                                                PAT_ADDRESS_EMAIL,
+-- MAGIC     vm.iweb_vacc_event_id                                                                                           IWEB_VACC_EVENT_ID,
+-- MAGIC     --to_date(CURRENT_TIMESTAMP,'yyyy-MM-dd')                                                                         REFRESH_DATE,
+-- MAGIC     to_date(vm.DELETION_DATE,'yyyy-MM-dd')                                                                          DELETION_DATE
+-- MAGIC
+-- MAGIC FROM {iisPATIENT_MASTER}                       pm
+-- MAGIC join {iisVACCINATION_MASTER}                    vm
+-- MAGIC     ON vm.asiis_pat_id_ptr = pm.asiis_pat_id
+-- MAGIC LEFT JOIN {iisIRMS}                             i
+-- MAGIC     ON i.irms_sys_id = vm.last_irms_sys_id_to_update 
+-- MAGIC LEFT JOIN {iisFACILITY_MASTER}                  fm
+-- MAGIC     ON vm.asiis_fac_id = fm.asiis_fac_id
+-- MAGIC LEFT JOIN {iisLOT_NUMBER}                       ln
+-- MAGIC     ON vm.lot_number_code = ln.lot_number_code
+-- MAGIC LEFT JOIN pat_master                                                                                              pma
+-- MAGIC     ON pm.asiis_pat_id = pma.asiis_pat_id
+-- MAGIC LEFT JOIN pat_address                                                                                               pz
+-- MAGIC     ON pm.asiis_pat_id = pz.asiis_pat_id_ptr
+-- MAGIC LEFT JOIN multi_race                                                                                                mr
+-- MAGIC     ON pm.asiis_pat_id = mr.asiis_pat_id_ptr
+-- MAGIC LEFT JOIN {iisASIIS_VACC_CODE}                  vc
+-- MAGIC     ON vc.asiis_vacc_code = vm.asiis_vacc_code
+-- MAGIC LEFT JOIN {iisVACCINE_PRODUCT_MAPPING}          m
+-- MAGIC     ON m.vaccine_product_id = ln.vaccine_product_id
+-- MAGIC     AND M.IS_USE_NDC IS NOT NULL
+-- MAGIC LEFT JOIN {iisVACCINE_FAMILY}                        vf
+-- MAGIC     ON vm.asiis_vacc_code = vf.asiis_vacc_code 
+-- MAGIC LEFT JOIN {iisVALID_VACCINATION}                vv
+-- MAGIC     ON (vm.asiis_pat_id_ptr = vv.asiis_pat_id
+-- MAGIC     AND vm.asiis_vacc_code = vv.asiis_vacc_code
+-- MAGIC     AND vm.vacc_date = vv.vacc_date
+-- MAGIC     AND vf.family_code = vv.family_code)
+-- MAGIC LEFT JOIN {iisINVALID_VACCINATION}              iv
+-- MAGIC      ON ( vm.asiis_pat_id_ptr = iv.asiis_pat_id
+-- MAGIC     AND vm.asiis_vacc_code = iv.asiis_vacc_code
+-- MAGIC     AND vm.vacc_date = iv.vacc_date
+-- MAGIC     AND vm.invalid_reason_code =iv.INVALID_REASON_CODE 
+-- MAGIC     AND vf.family_code = iv.family_code)
+-- MAGIC LEFT JOIN fac_zip                                                                                                   fz
+-- MAGIC     ON fm.asiis_fac_id = fz.asiis_fac_id
+-- MAGIC LEFT JOIN {iisPATIENT_CONTRAINDICATION}         pc
+-- MAGIC     ON (pm.asiis_pat_id = pc.asiis_pat_id_ptr
+-- MAGIC     AND pc.contra_code IN( 9, 15, 16, 19,  22, 23, 31, 43,
+-- MAGIC                           48, 53, 56, 58, 59, 97, 102, 106,
+-- MAGIC                           109, 116, 117, 118, 119, 243 )
+-- MAGIC     AND pc.deletion_date IS NULL)
+-- MAGIC --LEFT JOIN {iisSEROLOGY_RESERVE}                 sr
+-- MAGIC     --ON ( PM.asiis_pat_id = SR.asiis_pat_id_ptr
+-- MAGIC     --AND sr.serology_type_code IN ( 56, 57, 58, 59, 60, 61, 62, 63 )
+-- MAGIC     --AND sr.deletion_date IS NULL )
+-- MAGIC LEFT JOIN {iisVACCINATION_RESERVE}              vr
+-- MAGIC     ON ( vm.asiis_pat_id_ptr = vr.asiis_pat_id_ptr
+-- MAGIC     AND vm.asiis_vacc_code = vr.asiis_vacc_code
+-- MAGIC     AND vm.vacc_date = vr.vacc_date
+-- MAGIC     AND vm.insert_stamp = vr.insert_stamp
+-- MAGIC     AND vm.last_irms_sys_id_to_update = vr.irms_sys_id
+-- MAGIC     AND vm.last_irms_pat_id_to_update = vr.irms_pat_id )
+-- MAGIC LEFT JOIN PAT_PHONE                                                                                                 pl
+-- MAGIC     ON pm.asiis_pat_id = pl.asiis_pat_id_ptr
+-- MAGIC LEFT JOIN ADDRESS_ATO_VAX                                                                                           AAV
+-- MAGIC   ON AAV.EVENT_ADDRESS_ASSOCIATOR = CONCAT(VM.ASIIS_VACC_CODE,VM.VACC_DATE)
+-- MAGIC   AND AAV.ASIIS_PAT_ID_PTR = VM.ASIIS_PAT_ID_PTR
+-- MAGIC WHERE 
+-- MAGIC     vm.deletion_date IS NULL
+-- MAGIC ''')
+
+-- COMMAND ----------
+
+drop view if exists tbl;
+
+cache lazy table tbl
+select * from AllVaxEventTable where date(INSERT_STAMP) < date(current_date());
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC df = spark.sql('select * from tbl')
+-- MAGIC # df.display()
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Trim Column Contents
+-- MAGIC %python
+-- MAGIC # To remove spaces and inconsistencies, if a column contains string entries it will be trimmed of white space
+-- MAGIC for col in df.columns:
+-- MAGIC   if df.select(f'{col}').dtypes[0][1] == 'string':
+-- MAGIC     df = df.withColumn(f'{col}', F.trim(F.col(f'{col}')))
+
+-- COMMAND ----------
+
+-- MAGIC
+-- MAGIC %python
+-- MAGIC df.createOrReplaceTempView("df1")
+-- MAGIC AllVax = spark.sql('Select * From df1')
+
+-- COMMAND ----------
+
+-- MAGIC %python 
+-- MAGIC vax_event_path = f'tc_iis_prod.analytic_tables.all_vax_event' 
+-- MAGIC #Change Data Feed to do incremental and allow for Inserted, Deleted, and Updated rows for PipelineLog
+-- MAGIC standard_merge(target_table_pointer =f'{vax_event_path}', source_table_pointer = f'df1', primary_key_cols = ['VACC_EVENT_ID'])
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC Pipeline Log table
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC event_info = get_event_info_df(table_name = "All Vax Event", table_pointer = vax_event_path)
+-- MAGIC event_info = event_info.withColumn('run_result', F.lit('SUCCESS'))
+-- MAGIC event_info = event_info.withColumn('log_msg', F.lit(''))
+-- MAGIC event_info.display()
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC event_info.createOrReplaceTempView('df')
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC
+-- MAGIC #ONLY RUN ONCE
+-- MAGIC #spark.sql(f"""CREATE OR REPLACE TABLE tc_iis_prod.data_integration_interoperability.all_vax_event_log AS SELECT * FROM df """)
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC #RUN EVERYDAY EXCEPT THE FIRST RUN
+-- MAGIC spark.sql(f"""INSERT INTO tc_iis_prod.data_integration_interoperability.all_vax_event_log 
+-- MAGIC           SELECT * FROM df""")
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC #append_to_event_log_table(event_log_pointer = f'{LogTable_root}' , event_info_df= event_info)
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC #log_table = spark.read.format('delta').option("header",True).load("dbfs:/mnt/dohsaadlcedar/Informatics/Immunization/PipelineLogTable/All_Vax_Event_Log")
+-- MAGIC #df.display()
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC #csv = spark.sql(f"""SELECT * FROM tc_iis_prod.data_integration_interoperability.waiis_log""")
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC #WriteToSingleCSV(csv, "https://url.us.m.mimecastprotect.com/s/bEw3CERyRZU3Pq10YcNflc7Isz2?domain=dohsaadldbxteam.dfs.core.windows.net",label)
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC Meta Data
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC Metadata_schema = """
+-- MAGIC  table_name STRING,
+-- MAGIC  source STRING,
+-- MAGIC  target STRING,
+-- MAGIC  primary_keys STRING,
+-- MAGIC  transforms STRING,
+-- MAGIC  merge_type STRING,
+-- MAGIC  enable_cdf BOOLEAN,
+-- MAGIC  cdf_window INTEGER,
+-- MAGIC  update_stamp STRING
+-- MAGIC  """
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC MetaData_Table = create_or_fetch_metadata_table(analytical_metadata_pointer=f'{MetaData_root}AllVax_MetaTable',
+-- MAGIC                               path_or_catalog='catalog',
+-- MAGIC                               metadata_dict= metadata_AV,
+-- MAGIC                               metadata_schema_string = Metadata_schema)
+-- MAGIC pd_metadata_table = MetaData_Table.toPandas()
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC for index, row in pd_metadata_table.iterrows():
+-- MAGIC   
+-- MAGIC   # Perform a migration if the table does not exist
+-- MAGIC   print(f'Performing migration of All Vax Event')
+-- MAGIC   
+-- MAGIC   #migrate_or_return(target_table_path = row.target, 
+-- MAGIC                         #source_table_pointer = row.source, 
+-- MAGIC                         #enable_cdf = row.enable_cdf, 
+-- MAGIC                         #overwrite = False, 
+-- MAGIC                         #debug = False)
+-- MAGIC      
+-- MAGIC     # Update our update_stamp column in the metadata table, this will be the final step in this entire process.
+-- MAGIC   update_metadata_table(table_name=f'All Vax Event', 
+-- MAGIC                          analytical_metadata_pointer=f'{MetaData_root}AllVax_MetaTable',
+-- MAGIC                          date_format = "%Y-%m-%d", 
+-- MAGIC                          time_zone = 'US/Pacific',
+-- MAGIC                          debug=False)
+-- MAGIC
+-- MAGIC   
+-- MAGIC   print('-----------------------------------------------------------') # a seperator to make it clear when a new table's info is being printed.
+-- MAGIC
+

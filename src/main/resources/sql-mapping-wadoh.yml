@@ -1,22 +1,37 @@
 # WA DOH all_vax_event column mapping
-# Generated from all_vax_event_enriched_mapping.csv
 # Source: Washington Automated Immunization Information System (WAIIS) denormalized view
 #
+# Reference files (docs/sql-fhir/):
+#   wa-doh-all-vax-event-dictionary.csv   -- live schema as of 2026-05-27 (56 columns)
+#   wa-doh-all-vax-event-notebook.txt     -- Databricks notebook that builds the view
+#   wa-doh-all-vax-event-mapping.csv      -- enriched FHIR element assignments
+#
+# KNOWN DATA QUALITY ISSUES (must be resolved before production use):
+#   - ASIIS_PAT_ID and BEST_CDC_CODE are CAST AS DOUBLE in the view.
+#     CSV exports will produce float strings (e.g., "12345678.0", "208.0").
+#     The mapper must strip the ".0" suffix for these columns or they will not
+#     match FHIR identifier/code lookups.  See task 2.3b.
+#   - Asiis_Vacc_Code column name uses mixed case in the live dictionary.
+#
 # REVIEW CHECKLIST (task 2.3b):
-#   [ ] Replace all TODO:waiis-* OID placeholders with the correct OIDs from WA DOH
-#   [ ] Confirm BEST_CDC_CODE arrives as integer string ("208") not float ("208.0") in CSV exports
-#   [ ] Confirm PAT_GENDER values are exactly M / F / U in the export
-#   [ ] Confirm HISTORICAL values are exactly N / Y in the export
-#   [ ] Confirm INSERT_STAMP format in CSV exports (ISO: "2020-03-15 14:30:00" or "2020-03-15T14:30:00")
-#   [ ] Confirm ANATOMICAL_SITE contains HL7 v2 site codes (LT, LD, LA, etc.) after view transform
-#   [ ] Confirm ANATOMICAL_ROUTE contains NCI codes (C28161 etc.) after view transform
-#   [ ] Decide whether PAT_RACE1-6 require mapper support or can be deferred
-#   [ ] Confirm whether ASIIS_PAT_ID or a different column is the canonical patient deduplication key
+#   [ ] Replace all TODO:waiis-* OID placeholders with correct OIDs from WA DOH
+#   [ ] Confirm mapper handles DOUBLE columns (ASIIS_PAT_ID, BEST_CDC_CODE, etc.)
+#         -- they arrive as "208.0", "12345678.0" in CSV exports
+#   [ ] Confirm HISTORICAL values are exactly "N" / "Y" in VACCINATION_MASTER
+#   [ ] Confirm INSERT_STAMP format in CSV exports (Databricks timestamp:
+#         "2020-03-15T14:30:00.000" or "2020-03-15 14:30:00")
+#   [ ] Confirm whether ANATOMICAL_SITE, ANATOMICAL_ROUTE, CC_VOLUME,
+#         DELETION_DATE, IWEB_VACC_EVENT_ID are present in WA DOH exports
+#         (these are in the notebook SELECT but absent from the 2026-05-27
+#         live dictionary -- they may have been removed from the table)
+#   [ ] Verify PAT_RACE1-6 concept map below against current WAIIS race codes
+#         (source: commented-out mapping in All_Vax_Event_notebook_2026_05_27.txt)
 
 mappings:
 
   # -----------------------------------------------------------------------
   # PATIENT IDENTITY
+  # NOTE: ASIIS_PAT_ID is CAST AS DOUBLE -- CSV value will be "12345678.0"
   # -----------------------------------------------------------------------
 
   - column: ASIIS_PAT_ID
@@ -166,41 +181,144 @@ mappings:
     type: code
 
   # -----------------------------------------------------------------------
-  # PATIENT RACE  (slots 1-6, ASIIS codes)
-  # Note: concept maps for ASIIS race codes to OMB/CDC race codes are not
-  # yet defined here. These columns require mapper extension support.
-  # Included for documentation; effective mapping deferred to future work.
+  # PATIENT RACE  (slots 1-6, ASIIS integer codes)
+  # Concept map derived from commented-out mapping in the Databricks notebook.
+  # Verify these code values against current WAIIS race table before production.
+  # Note: mapper extension support for multi-slot race arrays is not yet
+  # implemented; these entries are documentation until that work lands.
   # -----------------------------------------------------------------------
 
   - column: PAT_RACE1
     resource: Patient
     path: extension.race
     type: code
+    concept_map:
+      - from: "1"
+        to: "2106-3"   # White
+      - from: "2"
+        to: "2054-5"   # Black or African American
+      - from: "4"
+        to: "2028-9"   # Asian
+      - from: "5"
+        to: "1002-5"   # American Indian or Alaska Native
+      - from: "6"
+        to: "2131-1"   # Other Race
+      - from: "7"
+        to: "2076-8"   # Native Hawaiian or Other Pacific Islander
+      - from: "8"
+        to: "2131-1"   # Other Race
+      - from: "9"
+        to: "UNK"
 
   - column: PAT_RACE2
     resource: Patient
     path: extension.race
     type: code
+    concept_map:
+      - from: "1"
+        to: "2106-3"
+      - from: "2"
+        to: "2054-5"
+      - from: "4"
+        to: "2028-9"
+      - from: "5"
+        to: "1002-5"
+      - from: "6"
+        to: "2131-1"
+      - from: "7"
+        to: "2076-8"
+      - from: "8"
+        to: "2131-1"
+      - from: "9"
+        to: "UNK"
 
   - column: PAT_RACE3
     resource: Patient
     path: extension.race
     type: code
+    concept_map:
+      - from: "1"
+        to: "2106-3"
+      - from: "2"
+        to: "2054-5"
+      - from: "4"
+        to: "2028-9"
+      - from: "5"
+        to: "1002-5"
+      - from: "6"
+        to: "2131-1"
+      - from: "7"
+        to: "2076-8"
+      - from: "8"
+        to: "2131-1"
+      - from: "9"
+        to: "UNK"
 
   - column: PAT_RACE4
     resource: Patient
     path: extension.race
     type: code
+    concept_map:
+      - from: "1"
+        to: "2106-3"
+      - from: "2"
+        to: "2054-5"
+      - from: "4"
+        to: "2028-9"
+      - from: "5"
+        to: "1002-5"
+      - from: "6"
+        to: "2131-1"
+      - from: "7"
+        to: "2076-8"
+      - from: "8"
+        to: "2131-1"
+      - from: "9"
+        to: "UNK"
 
   - column: PAT_RACE5
     resource: Patient
     path: extension.race
     type: code
+    concept_map:
+      - from: "1"
+        to: "2106-3"
+      - from: "2"
+        to: "2054-5"
+      - from: "4"
+        to: "2028-9"
+      - from: "5"
+        to: "1002-5"
+      - from: "6"
+        to: "2131-1"
+      - from: "7"
+        to: "2076-8"
+      - from: "8"
+        to: "2131-1"
+      - from: "9"
+        to: "UNK"
 
   - column: PAT_RACE6
     resource: Patient
     path: extension.race
     type: code
+    concept_map:
+      - from: "1"
+        to: "2106-3"
+      - from: "2"
+        to: "2054-5"
+      - from: "4"
+        to: "2028-9"
+      - from: "5"
+        to: "1002-5"
+      - from: "6"
+        to: "2131-1"
+      - from: "7"
+        to: "2076-8"
+      - from: "8"
+        to: "2131-1"
+      - from: "9"
+        to: "UNK"
 
   # -----------------------------------------------------------------------
   # IMMUNIZATION IDENTITY
@@ -210,8 +328,10 @@ mappings:
     resource: Immunization
     path: identifier
     type: string
-    system: "TODO:waiis-vacc-event-oid"   # replace with correct OID; synthetic ID: REPLACE(CONCAT('WA','V',...))
+    system: "TODO:waiis-vacc-event-oid"   # replace with correct OID; synthetic: REPLACE(CONCAT('WA','V',...))
 
+  # IWEB_VACC_EVENT_ID: present in the Databricks notebook SELECT but absent
+  # from the 2026-05-27 live dictionary -- may have been removed from the table.
   - column: IWEB_VACC_EVENT_ID
     resource: Immunization
     path: identifier
@@ -220,9 +340,8 @@ mappings:
 
   # -----------------------------------------------------------------------
   # VACCINE PRODUCT
-  # Note: BEST_CDC_CODE is CAST AS DOUBLE in the view -- confirm the CSV
-  # export contains integer strings ("208") not float strings ("208.0").
-  # If floats appear, a concept_map or mapper type fix will be needed.
+  # NOTE: BEST_CDC_CODE is CAST AS DOUBLE -- CSV value will be "208.0" not "208".
+  # NOTE: Asiis_Vacc_Code uses mixed case in the live dictionary.
   # -----------------------------------------------------------------------
 
   - column: BEST_CDC_CODE
@@ -231,7 +350,9 @@ mappings:
     type: code
     system: "http://hl7.org/fhir/sid/cvx"
 
-  - column: ASIIS_VACC_CODE
+  # Column name is "Asiis_Vacc_Code" (mixed case) per 2026-05-27 dictionary.
+  # CAST AS DOUBLE -- will be a float string in CSV exports.
+  - column: Asiis_Vacc_Code
     resource: Immunization
     path: vaccineCode
     type: code
@@ -267,6 +388,11 @@ mappings:
 
   # -----------------------------------------------------------------------
   # ADMINISTRATION
+  # ANATOMICAL_SITE and ANATOMICAL_ROUTE are present in the notebook SELECT
+  # but absent from the 2026-05-27 live dictionary. Included here in case
+  # WA DOH exports include them; ignored if the column is not present.
+  # View transforms: ANATOMICAL_SITE -> HL7 v2 body site codes (LT, LA, etc.)
+  #                  ANATOMICAL_ROUTE -> NCI C-codes (C28161 etc.)
   # -----------------------------------------------------------------------
 
   - column: VACC_DATE
@@ -274,29 +400,26 @@ mappings:
     path: occurrenceDateTime
     type: date
 
-  # ANATOMICAL_SITE: view CASE expression outputs HL7 v2 body site codes
-  # (LT=Left Thigh, LA=Left Arm, etc.)  No concept_map needed here.
   - column: ANATOMICAL_SITE
     resource: Immunization
     path: site
     type: code
     system: "http://terminology.hl7.org/CodeSystem/v2-0163"
 
-  # ANATOMICAL_ROUTE: view CASE expression outputs NCI Thesaurus C-codes
-  # (C28161=Intramuscular injection, etc.)  No concept_map needed here.
   - column: ANATOMICAL_ROUTE
     resource: Immunization
     path: route
     type: code
     system: "http://ncimeta.nci.nih.gov"
 
+  # CC_VOLUME: present in the notebook SELECT but absent from the 2026-05-27 dictionary.
   - column: CC_VOLUME
     resource: Immunization
     path: doseQuantity
     type: decimal
 
   # DOSE_NUMBER: view CASE outputs actual dose number string, 'INV' (invalid),
-  # or 'UNK' (unknown).  Passed through as-is to protocolApplied.doseNumber.
+  # or 'UNK' (unknown).  Passed through as-is.
   - column: DOSE_NUMBER
     resource: Immunization
     path: protocolApplied.doseNumber
@@ -312,8 +435,9 @@ mappings:
   # RECORD ORIGIN
   # -----------------------------------------------------------------------
 
-  # HISTORICAL: N = administered at facility (primarySource=true)
-  #             Y = historical record (primarySource=false)
+  # HISTORICAL: passed through as-is from VACCINATION_MASTER (no view transform).
+  # Assumed values: N = administered at facility (primarySource=true),
+  #                 Y = historical record (primarySource=false). Verify with WA DOH.
   - column: HISTORICAL
     resource: Immunization
     path: primarySource
@@ -329,7 +453,7 @@ mappings:
     path: reportOrigin
     type: string
 
-  # VFC_ELIGIBLE: CAST AS DOUBLE in view -- confirm CSV export format.
+  # VFC_ELIGIBLE: CAST AS DOUBLE -- confirm CSV export format.
   # FHIR fundingSource is a CodeableConcept (VFC eligibility codes).
   - column: VFC_ELIGIBLE
     resource: Immunization
@@ -339,7 +463,8 @@ mappings:
   # -----------------------------------------------------------------------
   # AUDIT / TEMPORAL
   # INSERT_STAMP is the primary _lastUpdated field for temporal filtering.
-  # Confirm CSV export format: "2020-03-15 14:30:00" or "2020-03-15T14:30:00"
+  # Databricks timestamp format in CSV: "2020-03-15T14:30:00.000" or
+  # "2020-03-15 14:30:00" -- confirm with WA DOH export settings.
   # -----------------------------------------------------------------------
 
   - column: INSERT_STAMP
@@ -353,8 +478,9 @@ mappings:
     path: recorded
     type: date
 
-  # DELETION_DATE: active records have NULL here (view filters deleted records).
-  # Included for documentation; NULL values are passed through to status.
+  # DELETION_DATE: present in the notebook SELECT but absent from the 2026-05-27
+  # dictionary. The view WHERE clause filters vm.deletion_date IS NULL, so all
+  # exported records are active and this column would always be NULL anyway.
   - column: DELETION_DATE
     resource: Immunization
     path: status
@@ -363,8 +489,9 @@ mappings:
   # -----------------------------------------------------------------------
   # ADMINISTERING ORGANIZATION / FACILITY
   # Note: Location and Organization resources require additional mapper
-  # support. These columns are included for documentation completeness.
-  # Effective mapping deferred to future work.
+  # support. Included for documentation completeness; deferred to future work.
+  # PROVIDER_FACILITY_TYPE: view CASE outputs HL7 v2 table 0442 numeric codes
+  # (e.g., '9'=Hospital, '12'=Private Practice, '19'=Public Health Dept).
   # -----------------------------------------------------------------------
 
   - column: ORG_NAME
