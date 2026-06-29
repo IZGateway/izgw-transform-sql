@@ -59,6 +59,11 @@ public class SqlImmunizationRetrievalService {
 
         appendLastUpdated(sql, params, lastUpdated);
 
+        String occCol = config.columnForPath("Immunization", "occurrenceDateTime");
+        if (occCol != null) {
+            sql.append(" ORDER BY ").append(occCol).append(" DESC");
+        }
+
         log.debug("Immunization retrieval SQL: {}", sql);
         List<Map<String, Object>> rows = jdbc.queryForList(sql.toString(), params);
         log.debug("Immunization retrieval returned {} rows", rows.size());

@@ -6,26 +6,42 @@
 #   wa-doh-all-vax-event-notebook.txt     -- Databricks notebook that builds the view
 #   wa-doh-all-vax-event-mapping.csv      -- enriched FHIR element assignments
 #
-# KNOWN DATA QUALITY ISSUES (must be resolved before production use):
-#   - ASIIS_PAT_ID and BEST_CDC_CODE are CAST AS DOUBLE in the view.
-#     CSV exports will produce float strings (e.g., "12345678.0", "208.0").
-#     The mapper must strip the ".0" suffix for these columns or they will not
-#     match FHIR identifier/code lookups.  See task 2.3b.
+# DATABRICKS OUTPUT NOTES:
+#   The all_vax_event view (see docs/sql-fhir/wa-doh-all-vax-event-notebook.txt)
+#   applies the following transforms before writing to the table:
+#   - CAST AS DOUBLE: ASIIS_PAT_ID, BEST_CDC_CODE, Asiis_Vacc_Code, IRMS_SYS_ID,
+#       ASIIS_FAC_ID, VFC_ELIGIBLE -- arrive as float strings ("208.0", "1.0").
+#       SqlTableMapper.stripDoubleZero() normalizes these before mapping.
+#   - ANATOMICAL_SITE: mapped by Databricks to HL7 v2-0163 abbreviated codes
+#       (LT, LA, RT, RA, LG, RG, LD, RD, LVL, RVL, LLFA, RLFA).
+#   - ANATOMICAL_ROUTE: mapped by Databricks to NCI Thesaurus C-codes
+#       (C28161=IM, C38238=ID, C38284=IN, C38276=IV, C38288=Oral, etc.).
+#   - DOSE_NUMBER: Databricks CASE -- 'INV' (invalid), 'UNK', or dose number string.
+#   - SERIES_COMPLETE: Databricks CASE -- 'YES', 'NO', or 'UNK'.
+#   - PROVIDER_FACILITY_TYPE: mapped by Databricks to HL7 v2-0442 numeric codes.
+#   - PAT_RACE1-6: raw WAIIS integer codes (1-9) pivoted. OMB mapping is
+#       applied here via concept_maps (sourced from the commented-out
+#       RecipientRace1-6 block in the notebook, lines 563-628).
+#   - HISTORICAL, PAT_GENDER, MANU_CODE, REPORTING_METHOD: passed through unchanged.
 #   - Asiis_Vacc_Code column name uses mixed case in the live dictionary.
 #
+# SYSTEM URIs:
+#   Identifier and code system URIs use https://doh.wa.gov/NamingSystem/<ColumnName>
+#   as placeholders. WA DOH should confirm or replace these with their canonical
+#   NamingSystem URLs if they publish them.
+#
 # REVIEW CHECKLIST (task 2.3b):
-#   [ ] Replace all TODO:waiis-* OID placeholders with correct OIDs from WA DOH
-#   [ ] Confirm mapper handles DOUBLE columns (ASIIS_PAT_ID, BEST_CDC_CODE, etc.)
-#         -- they arrive as "208.0", "12345678.0" in CSV exports
-#   [ ] Confirm HISTORICAL values are exactly "N" / "Y" in VACCINATION_MASTER
+#   [x] DOUBLE column stripping -- implemented in SqlTableMapper.stripDoubleZero()
+#   [ ] Confirm https://doh.wa.gov/NamingSystem/* URIs with WA DOH
+#   [ ] Confirm HISTORICAL values (assumed "N"=administered, "Y"=historical in VACCINATION_MASTER)
 #   [ ] Confirm INSERT_STAMP format in CSV exports (Databricks timestamp:
 #         "2020-03-15T14:30:00.000" or "2020-03-15 14:30:00")
 #   [ ] Confirm whether ANATOMICAL_SITE, ANATOMICAL_ROUTE, CC_VOLUME,
-#         DELETION_DATE, IWEB_VACC_EVENT_ID are present in WA DOH exports
-#         (these are in the notebook SELECT but absent from the 2026-05-27
-#         live dictionary -- they may have been removed from the table)
-#   [ ] Verify PAT_RACE1-6 concept map below against current WAIIS race codes
-#         (source: commented-out mapping in All_Vax_Event_notebook_2026_05_27.txt)
+#         IWEB_VACC_EVENT_ID are present in WA DOH exports
+#         (in the notebook SELECT but absent from the 2026-05-27 live dictionary)
+#   [x] PAT_RACE1-6 concept maps -- taken from commented-out RecipientRace1-6
+#         CASE expressions in the Databricks notebook (lines 563-628)
+#   [ ] Confirm PAT_GENDER values in PATIENT_MASTER (assumed M/F/U)
 
 mappings:
 
@@ -38,7 +54,7 @@ mappings:
     resource: Patient
     path: identifier
     type: string
-    system: "TODO:waiis-patient-id-oid"   # replace with the correct WAIIS OID from WA DOH
+    system: "https://doh.wa.gov/NamingSystem/ASIIS_PAT_ID"
 
   # -----------------------------------------------------------------------
   # PATIENT DEMOGRAPHICS  (used for patient search matching)
@@ -135,57 +151,71 @@ mappings:
 
   # -----------------------------------------------------------------------
   # PATIENT ADDRESS (at time of vaccination)
-  # Note: same FHIR paths as current address -- mapper does not yet
-  # distinguish use='old' vs use='home'. Deferred to future enhancement.
+  # Databricks builds this via the ADDRESS_ATO_VAX subquery (closest address
+  # record to the vaccination date). Mapped with path prefix address.historical.*
+  # so SqlPatientRowMapper.accumulateAtoAddresses() processes them separately
+  # from the current address. Addresses are accumulated in reverse VACC_DATE
+  # order (newest vaccination first) and added as Patient.address with use=old.
+  # Consecutive duplicate addresses are collapsed.
+  #
+  # NOTE: The ADDRESS_ATO_VAX subquery in the Databricks notebook contains a
+  # JOIN mismatch: contraindication and deferral UNION branches build their
+  # EVENT_ADDRESS_ASSOCIATOR using INSERT_STAMP or DEFERRAL_DATE, but the main
+  # query joins on CONCAT(ASIIS_VACC_CODE, VACC_DATE). Only the vaccination
+  # branch ever matches. Ask WA DOH whether this is intentional.
   # -----------------------------------------------------------------------
 
   - column: ATO_PAT_ADDRESS_STREET1
     resource: Patient
-    path: address.line
+    path: address.historical.line
     type: string
 
   - column: ATO_PAT_ADDRESS_STREET2
     resource: Patient
-    path: address.line
+    path: address.historical.line
     type: string
 
   - column: ATO_PAT_ADDRESS_CITY
     resource: Patient
-    path: address.city
+    path: address.historical.city
     type: string
 
   - column: ATO_PAT_ADDRESS_STATE
     resource: Patient
-    path: address.state
+    path: address.historical.state
     type: string
 
   - column: ATO_PAT_ADDRESS_ZIP
     resource: Patient
-    path: address.postalCode
+    path: address.historical.postalCode
     type: string
 
   - column: ATO_PAT_COUNTY_CODE
     resource: Patient
-    path: address.district
+    path: address.historical.district
     type: string
 
   # -----------------------------------------------------------------------
-  # PATIENT ETHNICITY
-  # Note: maps to US Core ethnicity extension -- requires extension support
-  # in the mapper (not yet implemented). Included for documentation.
+  # PATIENT ETHNICITY -- DEFERRED, needs WA DOH confirmation
+  # Databricks passes pat_ethnicity_code through unchanged (CAST AS string).
+  # We do not know whether the WAIIS values are OMB codes or internal integers.
+  # Confirm with WA DOH before enabling.
   # -----------------------------------------------------------------------
-
-  - column: PAT_ETHNICITY_CODE
-    resource: Patient
-    path: extension.ethnicity
-    type: code
+  # PAT_ETHNICITY_CODE -- deferred
 
   # -----------------------------------------------------------------------
-  # PATIENT RACE  (slots 1-6, ASIIS integer codes)
-  # Concept map derived from commented-out mapping in the Databricks notebook.
-  # Verify these code values against current WAIIS race table before production.
-  # Note: mapper extension support for multi-slot race arrays is not yet
-  # implemented; these entries are documentation until that work lands.
+  # PATIENT RACE  (PAT_RACE1-6)
+  # Databricks pivots PATIENT_RACE_RESERVE.pat_race (try_cast to int) into six
+  # slots ordered by race code integer ascending. The OMB mappings below are
+  # taken directly from the commented-out RecipientRace1-6 CASE expressions in
+  # the Databricks notebook (lines 563-628). Code 3 has no WHEN clause and is
+  # left unmapped. Code 9 and ELSE (RecipientRace1) map to 'UNK' and are
+  # silently skipped (no ombCategory sub-extension for unknown race).
+  # Both slots 6 and 8 map to '2131-1' (Other Race).
+  # All six columns use the same concept_map; they accumulate into a single
+  # US Core race extension (http://hl7.org/fhir/us/core/StructureDefinition/
+  # us-core-race) as ombCategory sub-extensions.
+  # System: urn:oid:2.16.840.1.113883.6.238 (CDCREC)
   # -----------------------------------------------------------------------
 
   - column: PAT_RACE1
@@ -194,19 +224,19 @@ mappings:
     type: code
     concept_map:
       - from: "1"
-        to: "2106-3"   # White
+        to: "2106-3"
       - from: "2"
-        to: "2054-5"   # Black or African American
+        to: "2054-5"
       - from: "4"
-        to: "2028-9"   # Asian
+        to: "2028-9"
       - from: "5"
-        to: "1002-5"   # American Indian or Alaska Native
+        to: "1002-5"
       - from: "6"
-        to: "2131-1"   # Other Race
+        to: "2131-1"
       - from: "7"
-        to: "2076-8"   # Native Hawaiian or Other Pacific Islander
+        to: "2076-8"
       - from: "8"
-        to: "2131-1"   # Other Race
+        to: "2131-1"
       - from: "9"
         to: "UNK"
 
@@ -328,7 +358,7 @@ mappings:
     resource: Immunization
     path: identifier
     type: string
-    system: "TODO:waiis-vacc-event-oid"   # replace with correct OID; synthetic: REPLACE(CONCAT('WA','V',...))
+    system: "https://doh.wa.gov/NamingSystem/VACC_EVENT_ID"
 
   # IWEB_VACC_EVENT_ID: present in the Databricks notebook SELECT but absent
   # from the 2026-05-27 live dictionary -- may have been removed from the table.
@@ -336,7 +366,7 @@ mappings:
     resource: Immunization
     path: identifier
     type: string
-    system: "TODO:waiis-iweb-vacc-event-oid"   # replace with correct OID for iWeb legacy event ID
+    system: "https://doh.wa.gov/NamingSystem/IWEB_VACC_EVENT_ID"
 
   # -----------------------------------------------------------------------
   # VACCINE PRODUCT
@@ -356,13 +386,25 @@ mappings:
     resource: Immunization
     path: vaccineCode
     type: code
-    system: "TODO:waiis-asiis-vacc-code-oid"   # replace with correct OID for internal ASIIS vaccine code
+    system: "https://doh.wa.gov/NamingSystem/Asiis_Vacc_Code"
 
+  # FAMILY_CODE: ImmuCast (STC) internal vaccine family grouping code.
+  # Codes are integers (1-24, with gaps) mapped to ACIP vaccine families:
+  #   1=DTaP/DT/Td/Tdap, 2=HIB, 3=POLIO, 4=HepB(3-dose), 5=MMR,
+  #   6=VARICELLA, 7=MENINGOCOCCAL, 9=HepA, 10=FLU, 11=PneumoPCV,
+  #   12=HepB, 13=ANTHRAX, 14=SMALLPOX, 15=MEASLES, 16=MUMPS,
+  #   17=RUBELLA, 18=PneumoPPV, 20=ROTAVIRUS, 21=HPV, 22=ZOSTER,
+  #   23=H1N1(inactive), 24=Tdap(inactive, included in code 1)
+  # Source: STC ImmuCast documentation (vaccine-group-level grouping only --
+  # NOT a CVX, CPT, or MVX code; those use official national publications).
+  # System OID must be confirmed with WA DOH -- ImmuCast does not publish a
+  # registered OID; WA DOH may assign a local WAIIS OID for this code system.
   - column: FAMILY_CODE
     resource: Immunization
     path: vaccineCode
     type: code
-    system: "TODO:waiis-family-code-oid"   # replace with correct OID for WAIIS vaccine family code
+    # Vaccine Family Codes table in ImmuCast 5.18.1 docs (see "Vaccine Family Codes" section)
+    system: "https://documentation.stchome.com/assets/prodfiles/ImmuCast/5_18_1/html/vacc_codes.htm"
 
   - column: NDC_CODE
     resource: Immunization
@@ -453,12 +495,19 @@ mappings:
     path: reportOrigin
     type: string
 
-  # VFC_ELIGIBLE: CAST AS DOUBLE -- confirm CSV export format.
-  # FHIR fundingSource is a CodeableConcept (VFC eligibility codes).
+  # VFC_ELIGIBLE: CAST AS DOUBLE in the view -- CSV value is "1.0" or "0.0".
+  # stripDoubleZero normalizes to "1" or "0" before concept_map lookup.
+  # Mapped to fundingSource using HL7 immunization-funding-source codes.
+  # "1" = VFC-eligible (publicly funded program); "0" = not VFC-eligible (private).
   - column: VFC_ELIGIBLE
     resource: Immunization
     path: fundingSource
     type: string
+    concept_map:
+      - from: "1"
+        to: "public"
+      - from: "0"
+        to: "private"
 
   # -----------------------------------------------------------------------
   # AUDIT / TEMPORAL
@@ -503,19 +552,19 @@ mappings:
     resource: Organization
     path: identifier
     type: string
-    system: "TODO:waiis-vfc-pin-oid"   # replace with correct OID for VFC program PIN
+    system: "https://doh.wa.gov/NamingSystem/VFC_PIN"
 
   - column: IRMS_SYS_ID
     resource: Organization
     path: identifier
     type: string
-    system: "TODO:waiis-irms-sys-id-oid"   # replace with correct OID for IRMS system ID
+    system: "https://doh.wa.gov/NamingSystem/IRMS_SYS_ID"
 
   - column: ASIIS_FAC_ID
     resource: Location
     path: identifier
     type: string
-    system: "TODO:waiis-asiis-fac-id-oid"   # replace with correct OID for ASIIS facility ID
+    system: "https://doh.wa.gov/NamingSystem/ASIIS_FAC_ID"
 
   - column: FAC_NAME
     resource: Location

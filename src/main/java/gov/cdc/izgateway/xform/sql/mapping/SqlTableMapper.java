@@ -46,7 +46,7 @@ public abstract class SqlTableMapper<T extends Resource> {
                 .findFirst()
                 .orElse(null);
             if (raw == null) continue;
-            String value = m.mapValue(raw.toString().trim());
+            String value = m.mapValue(stripDoubleZero(raw.toString().trim()));
             if (value == null || value.isEmpty()) continue;
             try {
                 applyField(resource, m, value);
@@ -55,6 +55,21 @@ public abstract class SqlTableMapper<T extends Resource> {
             }
         }
         return resource;
+    }
+
+    /**
+     * Strips the ".0" suffix from Databricks DOUBLE-cast integer columns.
+     * The all_vax_event view casts several integer ID/code columns as DOUBLE,
+     * producing strings like "208.0" or "12345678.0" in CSV exports.
+     */
+    protected static String stripDoubleZero(String value) {
+        if (value.endsWith(".0") && value.length() > 2) {
+            String prefix = value.substring(0, value.length() - 2);
+            if (prefix.chars().allMatch(Character::isDigit)) {
+                return prefix;
+            }
+        }
+        return value;
     }
 
     // ── Type converters ──────────────────────────────────────────────────────
@@ -80,7 +95,9 @@ public abstract class SqlTableMapper<T extends Resource> {
     }
 
     protected static BooleanType toBoolean(String value) {
-        return new BooleanType(Boolean.parseBoolean(value));
+        String trimmed = value.trim();
+        if (trimmed.isEmpty()) return new BooleanType(false);
+        return new BooleanType(List.of('1', 'T', 'Y').contains(trimmed.toUpperCase().charAt(0)));
     }
 
     protected static CodeType toCode(String value) {

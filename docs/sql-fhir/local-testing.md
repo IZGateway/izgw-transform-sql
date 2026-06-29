@@ -214,9 +214,10 @@ data folder and point the container at it:
 -e SQL_BACKENDS_TEST_MAPPING_CONFIG_PATH=/data/my-sql-mapping.yml
 ```
 
-See [sql-mapping.yml Format](#sql-mapping-yml-format) below for the structure. You
-can use `sql-mapping-wadoh.yml` from the `izgw-transform-sql` repository as a
-starting point.
+See [sql-mapping.yml Format](#sql-mapping-yml-format) below for the structure. The
+worked WA DOH example is
+[`sql-mapping-wadoh.yml`](https://github.com/IZGateway/izgw-transform-sql/blob/develop/src/main/resources/sql-mapping-wadoh.yml)
+in the `izgw-transform-sql` repository.
 
 ---
 
@@ -364,3 +365,10 @@ ignored. The complete built-in mapping is in `sql-mapping-wadoh.yml`.
 | `XFORM_CRYPTO_STORE_KEY_WS_CLIENT_FILE` | `/ssl/local/server.bcfks` | WS client TLS keystore path |
 | `XFORM_CRYPTO_STORE_TRUST_WS_CLIENT_FILE` | `/ssl/local/trust.bcfks` | WS client trust store path |
 | `XFORM_CONFIGURATIONS_DIRECTORY` | `/usr/share/izg-transform/quickstart/configuration` | Configuration directory path |
+
+---
+
+## See Also
+
+- [SQL FHIR API Documentation Index](index.md) -- full API reference for single-patient queries and bulk export
+- [WA DOH Pilot Reference Materials](../wa-doh-pilot/README.md) -- `all_vax_event` schema, enriched field mapping, and pilot architecture

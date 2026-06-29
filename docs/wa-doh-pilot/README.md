@@ -20,6 +20,7 @@ Database (CDDB).
 | [all_vax_event_dictionary_2026_05_27.csv](all_vax_event_dictionary_2026_05_27.csv) | Published WA DOH data dictionary: 58 column names and Spark data types for the `all_vax_event` table |
 | [all_vax_event_enriched_mapping.csv](all_vax_event_enriched_mapping.csv) | **Enriched field mapping** (generated): 61 fields with data types, categories, source expressions from the notebook, descriptions, and suggested FHIR resource/element mappings for the CR |
 | `Bulk FHIR Presentation_FINAL.pptx` | Conference presentation describing the pilot architecture, workflow, and goals. Binary file — available in the shared OneDrive folder; not committed to this repository. |
+| [Local Testing Guide](../sql-fhir/local-testing.md) | Running the SQL engine locally with Docker; configuring the engine against a local `all_vax_event` CSV extract |
 
 ---
 

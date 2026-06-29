@@ -43,6 +43,7 @@ differences are the URL prefix and the data source:
 |---|---|
 | [SQL FHIR API Reference](sql-fhir-api.md) | Single-patient query endpoints at `/sql/fhir/{name}/**` |
 | [Bulk FHIR Export API](bulk-fhir-api.md) | Async `$export` endpoints at `/bulk/sql/fhir/$export` |
+| [Local Testing Guide](local-testing.md) | Running the SQL engine locally with Docker; test endpoint configuration |
 
 ---
 

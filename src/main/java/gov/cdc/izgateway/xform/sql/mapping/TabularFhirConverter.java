@@ -29,6 +29,8 @@ public class TabularFhirConverter {
 
         Reference patientRef = new Reference("Patient/" + patient.getIdElement().getIdPart());
 
+        patientMapper.accumulateAtoAddresses(patient, immunizationRows);
+
         for (Map<String, Object> row : immunizationRows) {
             Immunization imm = immunizationMapper.map(row);
             imm.setPatient(patientRef);
