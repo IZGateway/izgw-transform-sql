@@ -3,7 +3,7 @@
 # Source: Washington Automated Immunization Information System (WAIIS) denormalized view
 #
 # REVIEW CHECKLIST (task 2.3b):
-#   [ ] Verify WAIIS OID (urn:oid:2.16.840.1.113883.3.1362) with WA DOH
+#   [ ] Replace all TODO:waiis-* OID placeholders with the correct OIDs from WA DOH
 #   [ ] Confirm BEST_CDC_CODE arrives as integer string ("208") not float ("208.0") in CSV exports
 #   [ ] Confirm PAT_GENDER values are exactly M / F / U in the export
 #   [ ] Confirm HISTORICAL values are exactly N / Y in the export
@@ -23,7 +23,7 @@ mappings:
     resource: Patient
     path: identifier
     type: string
-    system: "urn:oid:2.16.840.1.113883.3.1362"   # WAIIS patient ID system -- verify OID with WA DOH
+    system: "TODO:waiis-patient-id-oid"   # replace with the correct WAIIS OID from WA DOH
 
   # -----------------------------------------------------------------------
   # PATIENT DEMOGRAPHICS  (used for patient search matching)
@@ -210,13 +210,13 @@ mappings:
     resource: Immunization
     path: identifier
     type: string
-    system: "urn:oid:2.16.840.1.113883.3.1362"   # synthetic; REPLACE(CONCAT('WA','V',...))
+    system: "TODO:waiis-vacc-event-oid"   # replace with correct OID; synthetic ID: REPLACE(CONCAT('WA','V',...))
 
   - column: IWEB_VACC_EVENT_ID
     resource: Immunization
     path: identifier
     type: string
-    system: "urn:oid:2.16.840.1.113883.3.1362.1"  # iWeb legacy event ID
+    system: "TODO:waiis-iweb-vacc-event-oid"   # replace with correct OID for iWeb legacy event ID
 
   # -----------------------------------------------------------------------
   # VACCINE PRODUCT
@@ -235,13 +235,13 @@ mappings:
     resource: Immunization
     path: vaccineCode
     type: code
-    system: "urn:oid:2.16.840.1.113883.3.1362.2"  # internal ASIIS vaccine code
+    system: "TODO:waiis-asiis-vacc-code-oid"   # replace with correct OID for internal ASIIS vaccine code
 
   - column: FAMILY_CODE
     resource: Immunization
     path: vaccineCode
     type: code
-    system: "urn:oid:2.16.840.1.113883.3.1362.3"  # WAIIS vaccine family code
+    system: "TODO:waiis-family-code-oid"   # replace with correct OID for WAIIS vaccine family code
 
   - column: NDC_CODE
     resource: Immunization
@@ -376,19 +376,19 @@ mappings:
     resource: Organization
     path: identifier
     type: string
-    system: "urn:oid:2.16.840.1.113883.3.1362.4"  # WAIIS VFC PIN
+    system: "TODO:waiis-vfc-pin-oid"   # replace with correct OID for VFC program PIN
 
   - column: IRMS_SYS_ID
     resource: Organization
     path: identifier
     type: string
-    system: "urn:oid:2.16.840.1.113883.3.1362.5"  # IRMS system ID
+    system: "TODO:waiis-irms-sys-id-oid"   # replace with correct OID for IRMS system ID
 
   - column: ASIIS_FAC_ID
     resource: Location
     path: identifier
     type: string
-    system: "urn:oid:2.16.840.1.113883.3.1362.6"  # ASIIS facility ID
+    system: "TODO:waiis-asiis-fac-id-oid"   # replace with correct OID for ASIIS facility ID
 
   - column: FAC_NAME
     resource: Location
