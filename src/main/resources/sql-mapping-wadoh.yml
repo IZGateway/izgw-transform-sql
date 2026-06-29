@@ -1,0 +1,432 @@
+# WA DOH all_vax_event column mapping
+# Generated from all_vax_event_enriched_mapping.csv
+# Source: Washington Automated Immunization Information System (WAIIS) denormalized view
+#
+# REVIEW CHECKLIST (task 2.3b):
+#   [ ] Verify WAIIS OID (urn:oid:2.16.840.1.113883.3.1362) with WA DOH
+#   [ ] Confirm BEST_CDC_CODE arrives as integer string ("208") not float ("208.0") in CSV exports
+#   [ ] Confirm PAT_GENDER values are exactly M / F / U in the export
+#   [ ] Confirm HISTORICAL values are exactly N / Y in the export
+#   [ ] Confirm INSERT_STAMP format in CSV exports (ISO: "2020-03-15 14:30:00" or "2020-03-15T14:30:00")
+#   [ ] Confirm ANATOMICAL_SITE contains HL7 v2 site codes (LT, LD, LA, etc.) after view transform
+#   [ ] Confirm ANATOMICAL_ROUTE contains NCI codes (C28161 etc.) after view transform
+#   [ ] Decide whether PAT_RACE1-6 require mapper support or can be deferred
+#   [ ] Confirm whether ASIIS_PAT_ID or a different column is the canonical patient deduplication key
+
+mappings:
+
+  # -----------------------------------------------------------------------
+  # PATIENT IDENTITY
+  # -----------------------------------------------------------------------
+
+  - column: ASIIS_PAT_ID
+    resource: Patient
+    path: identifier
+    type: string
+    system: "urn:oid:2.16.840.1.113883.3.1362"   # WAIIS patient ID system -- verify OID with WA DOH
+
+  # -----------------------------------------------------------------------
+  # PATIENT DEMOGRAPHICS  (used for patient search matching)
+  # -----------------------------------------------------------------------
+
+  - column: PAT_LAST_NAME
+    resource: Patient
+    path: name.family
+    type: string
+
+  - column: PAT_FIRST_NAME
+    resource: Patient
+    path: name.given
+    type: string
+
+  - column: PAT_MIDDLE_NAME
+    resource: Patient
+    path: name.given
+    type: string
+
+  - column: PAT_BIRTH_DATE
+    resource: Patient
+    path: birthDate
+    type: date
+
+  - column: PAT_GENDER
+    resource: Patient
+    path: gender
+    type: code
+    concept_map:
+      - from: M
+        to: male
+      - from: F
+        to: female
+      - from: U
+        to: unknown
+
+  # -----------------------------------------------------------------------
+  # PATIENT LANGUAGE
+  # -----------------------------------------------------------------------
+
+  - column: PAT_LANGUAGE
+    resource: Patient
+    path: communication.language
+    type: string
+
+  # -----------------------------------------------------------------------
+  # PATIENT CONTACT
+  # -----------------------------------------------------------------------
+
+  - column: PAT_ADDRESS_PHONE
+    resource: Patient
+    path: telecom.phone
+    type: string
+
+  - column: PAT_ADDRESS_EMAIL
+    resource: Patient
+    path: telecom.email
+    type: string
+
+  # -----------------------------------------------------------------------
+  # PATIENT ADDRESS (current)
+  # -----------------------------------------------------------------------
+
+  - column: PAT_ADDRESS_STREET1
+    resource: Patient
+    path: address.line
+    type: string
+
+  - column: PAT_ADDRESS_STREET2
+    resource: Patient
+    path: address.line
+    type: string
+
+  - column: PAT_ADDRESS_CITY
+    resource: Patient
+    path: address.city
+    type: string
+
+  - column: PAT_ADDRESS_STATE
+    resource: Patient
+    path: address.state
+    type: string
+
+  - column: PAT_ADDRESS_ZIP
+    resource: Patient
+    path: address.postalCode
+    type: string
+
+  - column: PAT_COUNTY_CODE
+    resource: Patient
+    path: address.district
+    type: string
+
+  # -----------------------------------------------------------------------
+  # PATIENT ADDRESS (at time of vaccination)
+  # Note: same FHIR paths as current address -- mapper does not yet
+  # distinguish use='old' vs use='home'. Deferred to future enhancement.
+  # -----------------------------------------------------------------------
+
+  - column: ATO_PAT_ADDRESS_STREET1
+    resource: Patient
+    path: address.line
+    type: string
+
+  - column: ATO_PAT_ADDRESS_STREET2
+    resource: Patient
+    path: address.line
+    type: string
+
+  - column: ATO_PAT_ADDRESS_CITY
+    resource: Patient
+    path: address.city
+    type: string
+
+  - column: ATO_PAT_ADDRESS_STATE
+    resource: Patient
+    path: address.state
+    type: string
+
+  - column: ATO_PAT_ADDRESS_ZIP
+    resource: Patient
+    path: address.postalCode
+    type: string
+
+  - column: ATO_PAT_COUNTY_CODE
+    resource: Patient
+    path: address.district
+    type: string
+
+  # -----------------------------------------------------------------------
+  # PATIENT ETHNICITY
+  # Note: maps to US Core ethnicity extension -- requires extension support
+  # in the mapper (not yet implemented). Included for documentation.
+  # -----------------------------------------------------------------------
+
+  - column: PAT_ETHNICITY_CODE
+    resource: Patient
+    path: extension.ethnicity
+    type: code
+
+  # -----------------------------------------------------------------------
+  # PATIENT RACE  (slots 1-6, ASIIS codes)
+  # Note: concept maps for ASIIS race codes to OMB/CDC race codes are not
+  # yet defined here. These columns require mapper extension support.
+  # Included for documentation; effective mapping deferred to future work.
+  # -----------------------------------------------------------------------
+
+  - column: PAT_RACE1
+    resource: Patient
+    path: extension.race
+    type: code
+
+  - column: PAT_RACE2
+    resource: Patient
+    path: extension.race
+    type: code
+
+  - column: PAT_RACE3
+    resource: Patient
+    path: extension.race
+    type: code
+
+  - column: PAT_RACE4
+    resource: Patient
+    path: extension.race
+    type: code
+
+  - column: PAT_RACE5
+    resource: Patient
+    path: extension.race
+    type: code
+
+  - column: PAT_RACE6
+    resource: Patient
+    path: extension.race
+    type: code
+
+  # -----------------------------------------------------------------------
+  # IMMUNIZATION IDENTITY
+  # -----------------------------------------------------------------------
+
+  - column: VACC_EVENT_ID
+    resource: Immunization
+    path: identifier
+    type: string
+    system: "urn:oid:2.16.840.1.113883.3.1362"   # synthetic; REPLACE(CONCAT('WA','V',...))
+
+  - column: IWEB_VACC_EVENT_ID
+    resource: Immunization
+    path: identifier
+    type: string
+    system: "urn:oid:2.16.840.1.113883.3.1362.1"  # iWeb legacy event ID
+
+  # -----------------------------------------------------------------------
+  # VACCINE PRODUCT
+  # Note: BEST_CDC_CODE is CAST AS DOUBLE in the view -- confirm the CSV
+  # export contains integer strings ("208") not float strings ("208.0").
+  # If floats appear, a concept_map or mapper type fix will be needed.
+  # -----------------------------------------------------------------------
+
+  - column: BEST_CDC_CODE
+    resource: Immunization
+    path: vaccineCode.cvx
+    type: code
+    system: "http://hl7.org/fhir/sid/cvx"
+
+  - column: ASIIS_VACC_CODE
+    resource: Immunization
+    path: vaccineCode
+    type: code
+    system: "urn:oid:2.16.840.1.113883.3.1362.2"  # internal ASIIS vaccine code
+
+  - column: FAMILY_CODE
+    resource: Immunization
+    path: vaccineCode
+    type: code
+    system: "urn:oid:2.16.840.1.113883.3.1362.3"  # WAIIS vaccine family code
+
+  - column: NDC_CODE
+    resource: Immunization
+    path: vaccineCode.ndc
+    type: code
+    system: "http://hl7.org/fhir/sid/ndc"
+
+  - column: MANU_CODE
+    resource: Immunization
+    path: manufacturer
+    type: code
+    system: "http://terminology.hl7.org/CodeSystem/mvx"
+
+  - column: LOT_NUM
+    resource: Immunization
+    path: lotNumber
+    type: string
+
+  - column: EXPIRATION_DATE
+    resource: Immunization
+    path: expirationDate
+    type: date
+
+  # -----------------------------------------------------------------------
+  # ADMINISTRATION
+  # -----------------------------------------------------------------------
+
+  - column: VACC_DATE
+    resource: Immunization
+    path: occurrenceDateTime
+    type: date
+
+  # ANATOMICAL_SITE: view CASE expression outputs HL7 v2 body site codes
+  # (LT=Left Thigh, LA=Left Arm, etc.)  No concept_map needed here.
+  - column: ANATOMICAL_SITE
+    resource: Immunization
+    path: site
+    type: code
+    system: "http://terminology.hl7.org/CodeSystem/v2-0163"
+
+  # ANATOMICAL_ROUTE: view CASE expression outputs NCI Thesaurus C-codes
+  # (C28161=Intramuscular injection, etc.)  No concept_map needed here.
+  - column: ANATOMICAL_ROUTE
+    resource: Immunization
+    path: route
+    type: code
+    system: "http://ncimeta.nci.nih.gov"
+
+  - column: CC_VOLUME
+    resource: Immunization
+    path: doseQuantity
+    type: decimal
+
+  # DOSE_NUMBER: view CASE outputs actual dose number string, 'INV' (invalid),
+  # or 'UNK' (unknown).  Passed through as-is to protocolApplied.doseNumber.
+  - column: DOSE_NUMBER
+    resource: Immunization
+    path: protocolApplied.doseNumber
+    type: string
+
+  # SERIES_COMPLETE: view CASE outputs 'YES', 'NO', or 'UNK'.
+  - column: SERIES_COMPLETE
+    resource: Immunization
+    path: protocolApplied.seriesDosesString
+    type: string
+
+  # -----------------------------------------------------------------------
+  # RECORD ORIGIN
+  # -----------------------------------------------------------------------
+
+  # HISTORICAL: N = administered at facility (primarySource=true)
+  #             Y = historical record (primarySource=false)
+  - column: HISTORICAL
+    resource: Immunization
+    path: primarySource
+    type: boolean
+    concept_map:
+      - from: "N"
+        to: "true"
+      - from: "Y"
+        to: "false"
+
+  - column: REPORTING_METHOD
+    resource: Immunization
+    path: reportOrigin
+    type: string
+
+  # VFC_ELIGIBLE: CAST AS DOUBLE in view -- confirm CSV export format.
+  # FHIR fundingSource is a CodeableConcept (VFC eligibility codes).
+  - column: VFC_ELIGIBLE
+    resource: Immunization
+    path: fundingSource
+    type: string
+
+  # -----------------------------------------------------------------------
+  # AUDIT / TEMPORAL
+  # INSERT_STAMP is the primary _lastUpdated field for temporal filtering.
+  # Confirm CSV export format: "2020-03-15 14:30:00" or "2020-03-15T14:30:00"
+  # -----------------------------------------------------------------------
+
+  - column: INSERT_STAMP
+    resource: Immunization
+    path: recorded
+    type: dateTime
+    is_last_updated: true
+
+  - column: REGISTRY_ENTRY_STAMP
+    resource: Immunization
+    path: recorded
+    type: date
+
+  # DELETION_DATE: active records have NULL here (view filters deleted records).
+  # Included for documentation; NULL values are passed through to status.
+  - column: DELETION_DATE
+    resource: Immunization
+    path: status
+    type: date
+
+  # -----------------------------------------------------------------------
+  # ADMINISTERING ORGANIZATION / FACILITY
+  # Note: Location and Organization resources require additional mapper
+  # support. These columns are included for documentation completeness.
+  # Effective mapping deferred to future work.
+  # -----------------------------------------------------------------------
+
+  - column: ORG_NAME
+    resource: Organization
+    path: name
+    type: string
+
+  - column: VFC_PIN
+    resource: Organization
+    path: identifier
+    type: string
+    system: "urn:oid:2.16.840.1.113883.3.1362.4"  # WAIIS VFC PIN
+
+  - column: IRMS_SYS_ID
+    resource: Organization
+    path: identifier
+    type: string
+    system: "urn:oid:2.16.840.1.113883.3.1362.5"  # IRMS system ID
+
+  - column: ASIIS_FAC_ID
+    resource: Location
+    path: identifier
+    type: string
+    system: "urn:oid:2.16.840.1.113883.3.1362.6"  # ASIIS facility ID
+
+  - column: FAC_NAME
+    resource: Location
+    path: name
+    type: string
+
+  - column: PROVIDER_FACILITY_TYPE
+    resource: Location
+    path: type
+    type: code
+    system: "http://terminology.hl7.org/CodeSystem/v2-0442"
+
+  - column: FAC_ADDRESS_STREET1
+    resource: Location
+    path: address.line
+    type: string
+
+  - column: FAC_ADDRESS_STREET2
+    resource: Location
+    path: address.line
+    type: string
+
+  - column: FAC_ADDRESS_CITY
+    resource: Location
+    path: address.city
+    type: string
+
+  - column: FAC_ADDRESS_STATE
+    resource: Location
+    path: address.state
+    type: string
+
+  - column: FAC_ADDRESS_ZIP
+    resource: Location
+    path: address.postalCode
+    type: string
+
+  - column: FAC_ADDRESS_COUNTY_CODE
+    resource: Location
+    path: address.district
+    type: string

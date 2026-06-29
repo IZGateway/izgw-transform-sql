@@ -14,4 +14,4 @@ sql:
     test:
       type: CSV
       data-path: ${SQL_BACKENDS_TEST_DATA_PATH:/data/all_vax_event.csv}
-      mapping-config-path: ${SQL_BACKENDS_TEST_MAPPING_CONFIG_PATH:classpath:sql-mapping.yml}
+      mapping-config-path: ${SQL_BACKENDS_TEST_MAPPING_CONFIG_PATH:classpath:sql-mapping-wadoh.yml}

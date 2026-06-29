@@ -223,14 +223,18 @@ an environment variable when running the container:
 
 ## Supplying a Custom Column Mapping
 
-If your CSV uses different column names from the WA DOH defaults, provide a custom
-`sql-mapping.yml` in your data folder and point the container at it:
+The built-in column mapping (`sql-mapping-wadoh.yml`) targets the standard WA DOH
+`all_vax_event` column names. If your CSV uses different column names -- for example,
+from a customized view or a different IIS -- provide a custom mapping file in your
+data folder and point the container at it:
 
 ```bash
--e SQL_BACKENDS_TEST_MAPPING_CONFIG_PATH=/data/sql-mapping.yml
+-e SQL_BACKENDS_TEST_MAPPING_CONFIG_PATH=/data/my-sql-mapping.yml
 ```
 
-See [sql-mapping.yml Format](#sql-mapping-yml-format) below for the structure.
+See [sql-mapping.yml Format](#sql-mapping-yml-format) below for the structure. You
+can use `sql-mapping-wadoh.yml` from the `izgw-transform-sql` repository as a
+starting point.
 
 ---
 
@@ -287,19 +291,27 @@ The `test` backend expects a single denormalized CSV file where each row represe
 one vaccination event. A patient with multiple vaccinations appears on multiple rows,
 with the same demographic columns repeated on each row.
 
-The default column names match the WA DOH `all_vax_event` view. Key columns:
+The default column names match the WA DOH `all_vax_event` view as published by WAIIS.
+Key columns:
 
 | Column | FHIR Mapping | Notes |
 |---|---|---|
-| `IIS Patient ID` | `Patient.identifier` | Unique patient identifier; used to group rows |
-| `Name - Last` | `Patient.name.family` | Used for patient search |
-| `Name - First` | `Patient.name.given` | |
-| `Date of Birth` | `Patient.birthDate` | ISO date `YYYY-MM-DD` |
-| `Gender` | `Patient.gender` | `M` or `F` |
-| `IIS Vaccination Event ID` | `Immunization.identifier` | Unique per row |
-| `Vaccine Type (CVX)` | `Immunization.vaccineCode` | CVX code |
-| `Administration Date` | `Immunization.occurrenceDateTime` | |
-| `Record Creation Date` | `meta.lastUpdated` | Used for `_lastUpdated` filtering |
+| `ASIIS_PAT_ID` | `Patient.identifier` | Unique patient identifier; used to deduplicate rows per patient |
+| `PAT_LAST_NAME` | `Patient.name.family` | Used for patient search |
+| `PAT_FIRST_NAME` | `Patient.name.given` | |
+| `PAT_MIDDLE_NAME` | `Patient.name.given` | |
+| `PAT_BIRTH_DATE` | `Patient.birthDate` | ISO date `YYYY-MM-DD` |
+| `PAT_GENDER` | `Patient.gender` | `M`, `F`, or `U` |
+| `VACC_EVENT_ID` | `Immunization.identifier` | Synthetic unique vaccination event ID |
+| `BEST_CDC_CODE` | `Immunization.vaccineCode` (CVX) | CVX code; system `http://hl7.org/fhir/sid/cvx` |
+| `NDC_CODE` | `Immunization.vaccineCode` (NDC) | NDC drug code |
+| `VACC_DATE` | `Immunization.occurrenceDateTime` | Date administered |
+| `INSERT_STAMP` | `Immunization.recorded` | Insertion timestamp; used for `_lastUpdated` filtering |
+
+The full column-to-FHIR mapping is in
+`src/main/resources/sql-mapping-wadoh.yml` of the `izgw-transform-sql` repository.
+The source mapping documentation is in
+`docs/sql-fhir/wa-doh-all-vax-event-mapping.csv`.
 
 The first row must be a header row with column names. Values may be quoted with `"`.
 
@@ -309,38 +321,51 @@ The first row must be a header row with column names. Values may be quoted with 
 
 ```yaml
 mappings:
-  - column: "IIS Patient ID"
+  - column: ASIIS_PAT_ID
     resource: Patient
     path: identifier
     type: string
-    system: "urn:oid:2.16.840.1.114222.4.1"
+    system: "urn:oid:2.16.840.1.113883.3.1362"
 
-  - column: "Name - Last"
+  - column: PAT_LAST_NAME
     resource: Patient
     path: name.family
     type: string
 
-  - column: "Date of Birth"
+  - column: PAT_BIRTH_DATE
     resource: Patient
     path: birthDate
     type: date
 
-  - column: "Record Creation Date"
+  - column: PAT_GENDER
     resource: Patient
-    path: meta.lastUpdated
+    path: gender
+    type: code
+    concept_map:
+      - from: M
+        to: male
+      - from: F
+        to: female
+      - from: U
+        to: unknown
+
+  - column: INSERT_STAMP
+    resource: Immunization
+    path: recorded
     type: dateTime
     is_last_updated: true   # marks this column for _lastUpdated filtering
 
-  - column: "Vaccine Type (CVX)"
+  - column: BEST_CDC_CODE
     resource: Immunization
     path: vaccineCode.cvx
     type: code
+    system: "http://hl7.org/fhir/sid/cvx"
   # ... additional mappings
 ```
 
-The `is_last_updated: true` flag on exactly one Patient column and one Immunization
-column enables server-side `_lastUpdated` filtering. If omitted, `_lastUpdated`
-parameters are accepted but ignored.
+The `is_last_updated: true` flag on an Immunization column enables server-side
+`_lastUpdated` filtering. If omitted, `_lastUpdated` parameters are accepted but
+ignored. The complete built-in mapping is in `sql-mapping-wadoh.yml`.
 
 ---
 
