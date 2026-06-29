@@ -234,6 +234,44 @@ See [sql-mapping.yml Format](#sql-mapping-yml-format) below for the structure.
 
 ---
 
+## Running the Postman Collection
+
+A ready-made Postman collection is in `testing/scripts/sql-local/` of the
+`izgw-transform` repository:
+
+- **Collection**: `sql-local-test.postman_collection.json` -- 10 tests (LT_01-LT_10)
+- **Environment**: `localhost.sql-xform.postman_environment.json`
+
+Before importing, fill in the environment variables:
+
+| Variable | What to set |
+|---|---|
+| `jwt_sender_token` | Sender token printed by `generate-token` (Step 4) |
+| `jwt_admin_token` | Admin token printed by `generate-token` (Step 4) |
+| `test_patient_family` | Last name of a patient that exists in your CSV |
+| `test_patient_birthdate` | Date of birth matching that patient (YYYY-MM-DD) |
+| `test_last_updated_from` | `ge` + a date that your CSV has records after (e.g. `ge2020-01-01`) |
+
+To run via Newman (from the `izgw-transform` repo root):
+
+**Unix / Mac:**
+```bash
+newman run testing/scripts/sql-local/sql-local-test.postman_collection.json \
+  --environment testing/scripts/sql-local/localhost.sql-xform.postman_environment.json \
+  --insecure
+```
+
+**Windows:**
+```cmd
+newman run testing\scripts\sql-local\sql-local-test.postman_collection.json ^
+  --environment testing\scripts\sql-local\localhost.sql-xform.postman_environment.json ^
+  --insecure
+```
+
+The `--insecure` flag is required because the container uses a self-signed certificate.
+
+---
+
 ## Stopping and Cleaning Up
 
 ```bash
