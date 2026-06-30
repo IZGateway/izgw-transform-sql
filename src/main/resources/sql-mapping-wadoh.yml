@@ -468,10 +468,8 @@ mappings:
     type: string
 
   # SERIES_COMPLETE: view CASE outputs 'YES', 'NO', or 'UNK'.
-  - column: SERIES_COMPLETE
-    resource: Immunization
-    path: protocolApplied.seriesDosesString
-    type: string
+  # No FHIR R4 Immunization element accepts a yes/no completion flag directly.
+  # Dropped; revisit if WA DOH requires this data point.
 
   # -----------------------------------------------------------------------
   # RECORD ORIGIN
@@ -522,18 +520,8 @@ mappings:
     type: dateTime
     is_last_updated: true
 
-  - column: REGISTRY_ENTRY_STAMP
-    resource: Immunization
-    path: recorded
-    type: date
-
-  # DELETION_DATE: present in the notebook SELECT but absent from the 2026-05-27
-  # dictionary. The view WHERE clause filters vm.deletion_date IS NULL, so all
-  # exported records are active and this column would always be NULL anyway.
-  - column: DELETION_DATE
-    resource: Immunization
-    path: status
-    type: date
+  # REGISTRY_ENTRY_STAMP: removed -- INSERT_STAMP is the canonical recorded date.
+  # DELETION_DATE: removed -- WHERE clause guarantees it is always NULL.
 
   # -----------------------------------------------------------------------
   # ADMINISTERING ORGANIZATION / FACILITY
