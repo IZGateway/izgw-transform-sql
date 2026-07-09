@@ -1,17 +1,89 @@
 # SQL backend configuration defaults.
 # Activated when the sql-support Maven profile is used (IS_SQL=true builds).
-# All values are overridable via environment variables using Spring's
-# relaxed binding (SQL_BACKENDS_TEST_DATA_PATH -> sql.backends.test.data-path).
+# All values are overridable via environment variables using Spring's relaxed binding:
+#   sql.matching-threshold              -> SQL_MATCHING_THRESHOLD
+#   sql.backends.test.data-path         -> SQL_BACKENDS_TEST_DATA_PATH
+#   sql.backends.test.mapping-config-path -> SQL_BACKENDS_TEST_MAPPING_CONFIG_PATH
 
 sql:
+  # IDI (Immunization Data Integration) score threshold for accepting a candidate as a match.
+  # The search query returns all rows whose name and date-of-birth overlap the request; each
+  # candidate is scored 0.0-1.0 against the request demographics. A score >= this threshold
+  # is considered a match. Outcomes:
+  #   - Exactly one candidate >= threshold: 200 OK with Patient + Immunization bundle
+  #   - No candidates >= threshold:         200 OK with empty bundle (total: 0)
+  #   - Multiple candidates >= threshold:   422 Unprocessable Entity with OperationOutcome
+  # Raise this value to require a more exact name/DOB match; lower it to accept fuzzy matches.
   matching-threshold: 0.95
+
   backends:
+    # "dev" is always available. Serves the AIRA RSP test population (6,004 patients,
+    # 37,040 immunization events) from two hub-format CSVs bundled in the classpath.
+    # Use /sql/fhir/dev/Patient?family=FagenAIRA&birthdate=1963-12-26 to exercise it.
     dev:
+      # DEV_CSV: two-file hub format (separate patients.csv + immunizations.csv).
+      # CSV:     single denormalized all_vax_event CSV (WA DOH format).
+      # JDBC:    live SQL Server / RDS query via Spring DataSource.
       type: DEV_CSV
+
+      # Hub-format patients CSV. One row per patient.
+      # Columns: "IIS Patient ID", "Name - First", "Name - Middle", "Name - Last",
+      #          "Date of Birth", Gender, "Address: Street", "Address: City",
+      #          "Address: State", "Address: Zip", "Telephone Number", "Record Creation Date"
       patients-path: classpath:sql-dev/patients.csv
+
+      # Hub-format immunizations CSV. One row per vaccination event.
+      # Columns: "IIS Patient ID", "IIS Vaccination Event ID", "Vaccine Type (CVX)",
+      #          "Vaccine Type (NDC)", "Administration Date", Manufacturer, "Lot Number",
+      #          "Event Record Type", "Route of Administration", "Site of Administration",
+      #          "Expiration Date", "Dose Volume", "Record Creation Date"
       immunizations-path: classpath:sql-dev/immunizations.csv
+
+      # Column-to-FHIR mapping for the hub-format CSVs. The built-in sql-mapping.yml
+      # maps hub column names to FHIR Patient and Immunization elements.
       mapping-config-path: classpath:sql-mapping.yml
+
+    # "test" serves a single all_vax_event CSV mounted at /data inside the container.
+    # Override the file path and mapping via environment variables without image rebuild.
+    # Use /sql/fhir/test/Patient?family=FagenAIRA&birthdate=1963-12-26 to exercise it.
     test:
       type: CSV
+
+      # Path to the denormalized all_vax_event CSV inside the container.
+      # Each row is one vaccination event; patient demographics repeat per row.
+      # Override: SQL_BACKENDS_TEST_DATA_PATH=/data/my_extract.csv
       data-path: ${SQL_BACKENDS_TEST_DATA_PATH:/data/all_vax_event.csv}
+
+      # Column-to-FHIR mapping for the all_vax_event CSV.
+      # The built-in sql-mapping-wadoh.yml targets WA DOH all_vax_event column names.
+      # Supply a custom mapping file to adapt a different IIS column layout.
+      # Override: SQL_BACKENDS_TEST_MAPPING_CONFIG_PATH=/data/my-sql-mapping.yml
       mapping-config-path: ${SQL_BACKENDS_TEST_MAPPING_CONFIG_PATH:classpath:sql-mapping-wadoh.yml}
+
+    # Example JDBC backend configuration (commented out; copy and fill in for a live database).
+    # Activate by adding sql.backends.prod.type=JDBC (and datasource properties) to your
+    # deployment environment. The backend name ("prod") becomes the {name} path segment:
+    #   GET /sql/fhir/prod/Patient?family=...
+    #
+    # prod:
+    #   type: JDBC
+    #
+    #   # Name of the database view or table that returns one row per vaccination event,
+    #   # with patient demographic columns repeated on each row (denormalized).
+    #   # The query is: SELECT DISTINCT <patient_columns> FROM <immunization-table>
+    #   #               WHERE <name/DOB predicates> [AND <_lastUpdated predicate>]
+    #   immunization-table: all_vax_event
+    #
+    #   # Column in immunization-table that uniquely identifies the patient.
+    #   # Used to join immunization rows back to the matched patient.
+    #   # If omitted, derived from the mapping config (the column mapped to Patient.identifier).
+    #   patient-id-column: ASIIS_PAT_ID
+    #
+    #   # Column-to-FHIR mapping for this database schema.
+    #   # classpath: loads from the JAR; file: loads from the filesystem or EFS mount.
+    #   mapping-config-path: file:/data/sql-mapping-prod.yml
+    #
+    #   # Spring DataSource for this backend (standard Spring Boot datasource properties):
+    #   # spring.datasource.url=jdbc:sqlserver://...
+    #   # spring.datasource.username=...
+    #   # spring.datasource.password=...  (or use spring.datasource.hikari.* / Secrets Manager)
