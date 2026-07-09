@@ -27,8 +27,8 @@ class SqlDevBackendTests {
     @Test
     void query_matchingPatient_returnsBundle() {
         Patient search = new Patient();
-        search.getNameFirstRep().setFamily("Smith");
-        search.setBirthDateElement(new DateType("1985-03-15"));
+        search.getNameFirstRep().setFamily("FagenAIRA");
+        search.setBirthDateElement(new DateType("1963-12-26"));
 
         QueryResult result = backend.query(search, null);
 
@@ -53,12 +53,12 @@ class SqlDevBackendTests {
     @Test
     void query_patientWithImmunizations_includesImmunizations() {
         Patient search = new Patient();
-        search.getNameFirstRep().setFamily("Smith");
-        search.setBirthDateElement(new DateType("1985-03-15"));
+        search.getNameFirstRep().setFamily("FagenAIRA");
+        search.setBirthDateElement(new DateType("1963-12-26"));
 
         QueryResult result = backend.query(search, null);
 
-        // Patient + 2 immunizations = 3 entries
-        assertEquals(3, result.getBundle().getEntry().size());
+        // Patient + 1 immunization = 2 entries (FagenAIRA TheodoricAIRA, AIRA test data)
+        assertEquals(2, result.getBundle().getEntry().size());
     }
 }
