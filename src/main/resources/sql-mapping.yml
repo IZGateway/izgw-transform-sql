@@ -38,28 +38,28 @@ mappings:
 
   - column: "Address: Street"
     resource: Patient
-    path: address.line
+    path: address(1).line
     type: string
 
   - column: "Address: City"
     resource: Patient
-    path: address.city
+    path: address(1).city
     type: string
 
   - column: "Address: State"
     resource: Patient
-    path: address.state
+    path: address(1).state
     type: string
 
   - column: "Address: Zip"
     resource: Patient
-    path: address.postalCode
+    path: address(1).postalCode
     type: string
 
   - column: "Telephone Number"
     resource: Patient
-    path: telecom.phone
-    type: string
+    path: telecom
+    value: "ContactPoint{system: 'phone', value: $value}"
 
   - column: "Record Creation Date"
     resource: Patient
@@ -76,13 +76,13 @@ mappings:
 
   - column: "Vaccine Type (CVX)"
     resource: Immunization
-    path: vaccineCode.cvx
-    type: code
+    path: vaccineCode.coding
+    value: "Coding{system: 'http://hl7.org/fhir/sid/cvx', code: $value}"
 
   - column: "Vaccine Type (NDC)"
     resource: Immunization
-    path: vaccineCode.ndc
-    type: code
+    path: vaccineCode.coding
+    value: "Coding{system: 'http://hl7.org/fhir/sid/ndc', code: $value}"
 
   - column: "Administration Date"
     resource: Immunization
@@ -92,27 +92,22 @@ mappings:
   - column: Manufacturer
     resource: Immunization
     path: manufacturer
-    type: string
+    value: "Reference{display: $value}"
 
   - column: "Lot Number"
     resource: Immunization
     path: lotNumber
     type: string
 
-  - column: "Event Record Type"
-    resource: Immunization
-    path: status
-    type: code
-
   - column: "Route of Administration"
     resource: Immunization
     path: route
-    type: code
+    value: "CodeableConcept{coding: Coding{code: $value}}"
 
   - column: "Site of Administration"
     resource: Immunization
     path: site
-    type: code
+    value: "CodeableConcept{coding: Coding{code: $value}}"
 
   - column: "Expiration Date"
     resource: Immunization
@@ -122,7 +117,7 @@ mappings:
   - column: "Dose Volume"
     resource: Immunization
     path: doseQuantity
-    type: decimal
+    value: "Quantity{value: $value}"
 
   - column: "Record Creation Date"
     resource: Immunization

@@ -17,6 +17,8 @@ public class ResourceMapping {
     @JsonProperty("is_last_updated")
     private boolean lastUpdated;
 
+    private String value;
+
     public String getColumn() { return column; }
     public void setColumn(String column) { this.column = column; }
     public String getResource() { return resource; }
@@ -33,6 +35,8 @@ public class ResourceMapping {
     public void setConceptMap(List<ConceptMapEntry> conceptMap) { this.conceptMap = conceptMap; }
     public boolean isLastUpdated() { return lastUpdated; }
     public void setLastUpdated(boolean lastUpdated) { this.lastUpdated = lastUpdated; }
+    public String getValue() { return value; }
+    public void setValue(String value) { this.value = value; }
 
     public String mapValue(String raw) {
         if (conceptMap == null || raw == null) return raw;

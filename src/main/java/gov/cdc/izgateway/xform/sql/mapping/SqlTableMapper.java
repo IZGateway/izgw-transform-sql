@@ -33,7 +33,7 @@ public abstract class SqlTableMapper<T extends Resource> {
      * Apply a single mapped value to the target resource at the declared path.
      * Subclasses handle the resource-specific paths.
      */
-    protected abstract void applyField(T resource, ResourceMapping mapping, String value);
+    protected abstract void applyField(T resource, ResourceMapping mapping, String value, Map<String, Object> row);
 
     public T map(Map<String, Object> row) {
         T resource = newResource();
@@ -49,7 +49,7 @@ public abstract class SqlTableMapper<T extends Resource> {
             String value = m.mapValue(stripDoubleZero(raw.toString().trim()));
             if (value == null || value.isEmpty()) continue;
             try {
-                applyField(resource, m, value);
+                applyField(resource, m, value, row);
             } catch (Exception e) {
                 log.debug("Could not apply column {} to {}.{}: {}", m.getColumn(), resourceType, m.getPath(), e.getMessage());
             }

@@ -1,9 +1,15 @@
 package gov.cdc.izgateway.xform.sql.mapping;
 
+import gov.cdc.izgw.v2tofhir.segment.PIDParser;
+import gov.cdc.izgw.v2tofhir.terminology.Mapping;
+import gov.cdc.izgw.v2tofhir.terminology.RaceAndEthnicity;
+import gov.cdc.izgw.v2tofhir.terminology.Systems;
 import org.hl7.fhir.r4.model.*;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 public class SqlPatientRowMapper extends SqlTableMapper<Patient> {
 
@@ -17,33 +23,43 @@ public class SqlPatientRowMapper extends SqlTableMapper<Patient> {
     }
 
     @Override
-    protected void applyField(Patient patient, ResourceMapping m, String value) {
-        switch (m.getPath()) {
+    public Patient map(Map<String, Object> row) {
+        Patient patient = super.map(row);
+        pruneEmptyAddressSlots(patient);
+        buildRaceText(patient);
+        return patient;
+    }
+
+    @Override
+    protected void applyField(Patient patient, ResourceMapping m, String value, Map<String, Object> row) {
+        String path = m.getPath();
+
+        if (path.startsWith("address(")) {
+            applyAddressField(patient, path, value);
+            return;
+        }
+        if (path.startsWith("extension(")) {
+            applyExtensionPath(patient, path, value);
+            return;
+        }
+
+        switch (path) {
             case "name.family" -> patient.getNameFirstRep().setFamily(value);
-            case "name.given" -> patient.getNameFirstRep().addGiven(value);
-            case "birthDate" -> patient.setBirthDateElement(toDate(value));
+            case "name.given"  -> patient.getNameFirstRep().addGiven(value);
+            case "birthDate"   -> patient.setBirthDateElement(toDate(value));
             case "gender" -> {
                 String code = switch (value.toLowerCase()) {
-                    case "m", "male" -> "male";
+                    case "m", "male"   -> "male";
                     case "f", "female" -> "female";
-                    default -> "unknown";
+                    default            -> "unknown";
                 };
                 patient.setGender(Enumerations.AdministrativeGender.fromCode(code));
             }
-            case "address.line" -> patient.getAddressFirstRep().addLine(value);
-            case "address.city" -> patient.getAddressFirstRep().setCity(value);
-            case "address.state" -> patient.getAddressFirstRep().setState(value);
-            case "address.postalCode" -> patient.getAddressFirstRep().setPostalCode(value);
-            case "address.district" -> patient.getAddressFirstRep().setDistrict(value);
-            case "telecom.phone" -> {
-                ContactPoint cp = patient.addTelecom();
-                cp.setSystem(ContactPoint.ContactPointSystem.PHONE);
-                cp.setValue(value);
-            }
-            case "telecom.email" -> {
-                ContactPoint cp = patient.addTelecom();
-                cp.setSystem(ContactPoint.ContactPointSystem.EMAIL);
-                cp.setValue(value);
+            case "telecom" -> {
+                if (m.getValue() != null) {
+                    Object evaluated = MappingValueExpression.evaluate(m.getValue(), value, row);
+                    if (evaluated instanceof ContactPoint cp) patient.getTelecom().add(cp);
+                }
             }
             case "communication.language" -> patient.addCommunication()
                 .setLanguage(toCodeableConcept(value, "urn:ietf:bcp:47", null));
@@ -53,34 +69,117 @@ public class SqlPatientRowMapper extends SqlTableMapper<Patient> {
                 id.setValue(value);
             }
             case "meta.lastUpdated" -> patient.getMeta().setLastUpdatedElement(toInstant(value));
-            case "extension.race" -> {
-                if ("UNK".equals(value)) break;
-                Extension raceExt = patient.getExtension().stream()
-                    .filter(e -> "http://hl7.org/fhir/us/core/StructureDefinition/us-core-race".equals(e.getUrl()))
-                    .findFirst()
-                    .orElseGet(() -> patient.addExtension()
-                        .setUrl("http://hl7.org/fhir/us/core/StructureDefinition/us-core-race"));
-                raceExt.addExtension("ombCategory",
-                    toCoding(value, "urn:oid:2.16.840.1.113883.6.238", null));
-            }
-            // address.historical.* paths are processed by accumulateAtoAddresses(), not here
-            case "address.historical.line",
-                 "address.historical.city",
-                 "address.historical.state",
-                 "address.historical.postalCode",
-                 "address.historical.district" -> { /* no-op */ }
-            default -> log.debug("Unhandled Patient path: {}", m.getPath());
+            default -> log.debug("Unhandled Patient path: {}", path);
         }
     }
 
+    // -- Address slot helpers ---------------------------------------------------
+
     /**
-     * Appends historical (address-at-time-of-vaccination) addresses to the patient.
-     * Rows must already be sorted by vaccination date descending so that the most
-     * recent address appears first. Consecutive duplicate addresses are collapsed.
+     * Applies a value to the address slot identified in path (e.g., address(1).city).
+     * Slots are 1-based: address(1) is the first address, address(2) the second.
+     */
+    private static void applyAddressField(Patient patient, String path, String value) {
+        int open  = path.indexOf('(');
+        int close = path.indexOf(')');
+        int dot   = path.indexOf('.', close);
+        if (open < 0 || close < 0 || dot < 0) return;
+
+        int slot;
+        try {
+            slot = Integer.parseInt(path.substring(open + 1, close));
+        } catch (NumberFormatException e) {
+            return;
+        }
+        String field = path.substring(dot + 1);
+        Address a = getOrCreateAddressSlot(patient, slot);
+        applyAddressSubfield(a, field, value);
+    }
+
+    private static Address getOrCreateAddressSlot(Patient patient, int slot) {
+        List<Address> addresses = patient.getAddress();
+        while (addresses.size() < slot) {
+            addresses.add(new Address());
+        }
+        return addresses.get(slot - 1);
+    }
+
+    private static void applyAddressSubfield(Address a, String field, String value) {
+        switch (field) {
+            case "line"       -> a.addLine(value);
+            case "city"       -> a.setCity(value);
+            case "state"      -> a.setState(value);
+            case "postalCode" -> a.setPostalCode(value);
+            case "district"   -> a.setDistrict(value);
+            default -> { /* ignore unknown subfields */ }
+        }
+    }
+
+    private static void pruneEmptyAddressSlots(Patient patient) {
+        patient.getAddress().removeIf(a ->
+            a.getLine().isEmpty()
+            && a.getCity() == null
+            && a.getState() == null
+            && a.getPostalCode() == null
+            && a.getDistrict() == null);
+    }
+
+    // -- Extension helpers ------------------------------------------------------
+
+    private static void applyExtensionPath(Patient patient, String path, String value) {
+        if (path.contains(RaceAndEthnicity.US_CORE_RACE)) {
+            applyRaceExtension(patient, value);
+        } else if (path.contains(RaceAndEthnicity.US_CORE_ETHNICITY)) {
+            applyEthnicityExtension(patient, value);
+        } else {
+            log.debug("Unhandled extension path: {}", path);
+        }
+    }
+
+    private static void applyRaceExtension(Patient patient, String value) {
+        if ("UNK".equals(value)) return;
+        Extension raceExt = patient.getExtension().stream()
+            .filter(e -> RaceAndEthnicity.US_CORE_RACE.equals(e.getUrl()))
+            .findFirst()
+            .orElseGet(() -> patient.addExtension().setUrl(RaceAndEthnicity.US_CORE_RACE));
+        Coding c = new Coding(Systems.CDCREC, value, Mapping.getDisplay(value, Systems.CDCREC));
+        raceExt.addExtension(PIDParser.OMB_CATEGORY, c);
+    }
+
+    private static void applyEthnicityExtension(Patient patient, String value) {
+        if ("UNK".equals(value)) return;
+        String display = Mapping.getDisplay(value, Systems.CDCREC);
+        CodeableConcept ethnicity = new CodeableConcept();
+        if (display != null) ethnicity.setText(display);
+        ethnicity.addCoding(new Coding(Systems.CDCREC, value, display));
+        Extension ethExt = patient.addExtension().setUrl(RaceAndEthnicity.US_CORE_ETHNICITY);
+        RaceAndEthnicity.setEthnicityCode(ethnicity, ethExt);
+    }
+
+    private static void buildRaceText(Patient patient) {
+        Extension raceExt = patient.getExtensionByUrl(RaceAndEthnicity.US_CORE_RACE);
+        if (raceExt == null || raceExt.hasExtension("text")) return;
+        List<Extension> ombCats = raceExt.getExtensionsByUrl(PIDParser.OMB_CATEGORY);
+        if (ombCats.isEmpty()) return;
+        String text = ombCats.stream()
+            .map(e -> {
+                Coding c = (Coding) e.getValue();
+                return c.hasDisplay() ? c.getDisplay() : c.getCode();
+            })
+            .collect(Collectors.joining("; "));
+        raceExt.addExtension("text", new StringType(text));
+    }
+
+    // -- ATO address accumulation -----------------------------------------------
+
+    /**
+     * Appends at-time-of-vaccination addresses (address slot 2) to the patient.
+     * Rows must already be sorted by vaccination date descending so the most recent
+     * address appears first. Consecutive duplicate addresses are collapsed.
      */
     public void accumulateAtoAddresses(Patient patient, List<Map<String, Object>> rows) {
         List<ResourceMapping> atoMappings = config.forResource("Patient").stream()
-            .filter(m -> m.getPath().startsWith("address.historical."))
+            .filter(m -> m.getPath().startsWith("address(2)."))
             .toList();
         if (atoMappings.isEmpty()) return;
 
@@ -95,7 +194,6 @@ public class SqlPatientRowMapper extends SqlTableMapper<Patient> {
 
     private Address buildAtoAddress(Map<String, Object> row, List<ResourceMapping> atoMappings) {
         Address a = new Address();
-        a.setUse(Address.AddressUse.OLD);
         boolean hasData = false;
         for (ResourceMapping m : atoMappings) {
             String colKey = m.getColumn().toLowerCase();
@@ -108,14 +206,9 @@ public class SqlPatientRowMapper extends SqlTableMapper<Patient> {
             String value = stripDoubleZero(raw.toString().trim());
             if (value.isEmpty()) continue;
             hasData = true;
-            switch (m.getPath()) {
-                case "address.historical.line"       -> a.addLine(value);
-                case "address.historical.city"       -> a.setCity(value);
-                case "address.historical.state"      -> a.setState(value);
-                case "address.historical.postalCode" -> a.setPostalCode(value);
-                case "address.historical.district"   -> a.setDistrict(value);
-                default -> { /* ignore */ }
-            }
+            // strip "address(2)." prefix to get the subfield name
+            String field = m.getPath().substring("address(2).".length());
+            applyAddressSubfield(a, field, value);
         }
         return hasData ? a : null;
     }

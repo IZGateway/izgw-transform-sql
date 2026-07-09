@@ -30,6 +30,32 @@
 #   as placeholders. WA DOH should confirm or replace these with their canonical
 #   NamingSystem URLs if they publish them.
 #
+# MAPPING DSL REFERENCE:
+#
+#   column:      source column name from the CSV header row
+#   resource:    target FHIR resource type (Patient, Immunization, Organization, Location)
+#   path:        FHIRPath navigation to the target element (always a legitimate FHIRPath).
+#                  Extended notation: address(N) selects the Nth Patient.address slot
+#                  (1-based, created on demand). No use code is set on either slot;
+#                  slot order conveys the relationship (1=current, 2=at time of
+#                  vaccination). Slots with no populated fields after mapping are pruned.
+#   type:        primitive type for direct assignment: string, date, dateTime, boolean,
+#                  decimal, code. When value: is present, type: still governs
+#                  concept_map translation but value: controls what is written.
+#   value:       FHIRPath-compatible expression that constructs a complex value.
+#                  $value   = concept-mapped column value (or raw if no concept_map)
+#                  $row.COL = any column from the current CSV row
+#                  Constructor syntax: TypeName{field: expr, ...}
+#                    e.g. Coding{system: 'http://...', code: $value}
+#                       ContactPoint{system: 'phone', value: $value}
+#                  When path: targets a list (telecom, vaccineCode.coding, etc.),
+#                  the constructed value is appended to that list.
+#   concept_map: list of {from, to} pairs applied to the raw column value before
+#                  it is assigned or passed to value: as $value.
+#   system:      shorthand for Identifier targets only; sets Identifier.system when
+#                  path: resolves to an identifier element and no value: is present.
+#   is_last_updated: true marks this column as the _lastUpdated temporal filter target.
+#
 # REVIEW CHECKLIST (task 2.3b):
 #   [x] DOUBLE column stripping -- implemented in SqlTableMapper.stripDoubleZero()
 #   [ ] Confirm https://doh.wa.gov/NamingSystem/* URIs with WA DOH
@@ -41,6 +67,17 @@
 #         (in the notebook SELECT but absent from the 2026-05-27 live dictionary)
 #   [x] PAT_RACE1-6 concept maps -- taken from commented-out RecipientRace1-6
 #         CASE expressions in the Databricks notebook (lines 563-628)
+#   [ ] Confirm PAT_RACE1-6 domain: are the 9 integer codes (1-9) the exhaustive set,
+#         or can other codes appear (e.g., additional CDC CDCREC detailed race codes)?
+#         If additional codes are possible, the concept_maps are incomplete and unrecognized
+#         codes will pass through as-is to the ombCategory slot, which would be wrong.
+#   [ ] Confirm PAT_ETHNICITY_CODE domain: is it limited to the two OMB values
+#         (H -> 2135-2 Hispanic or Latino, N -> 2186-5 Not Hispanic or Latino), or does
+#         it include granular CDC CDCREC ethnicity codes (e.g., 2148-5 Mexican, 2155-0
+#         Puerto Rican)?  If granular codes are possible, the mapping must be restructured:
+#         granular codes go into a "detailed" sub-extension, and the ombCategory slot must
+#         carry the parent OMB code (derived from the granular code) -- the current mapping
+#         treats every code as an ombCategory entry and will be incorrect for granular codes.
 #   [ ] Confirm PAT_GENDER values in PATIENT_MASTER (assumed M/F/U)
 
 mappings:
@@ -103,60 +140,64 @@ mappings:
 
   # -----------------------------------------------------------------------
   # PATIENT CONTACT
+  # ContactPoint constructed via value: expression; system discriminates
+  # phone from email entries in the telecom list.
   # -----------------------------------------------------------------------
 
   - column: PAT_ADDRESS_PHONE
     resource: Patient
-    path: telecom.phone
-    type: string
+    path: telecom
+    value: "ContactPoint{system: 'phone', value: $value}"
 
   - column: PAT_ADDRESS_EMAIL
     resource: Patient
-    path: telecom.email
-    type: string
+    path: telecom
+    value: "ContactPoint{system: 'email', value: $value}"
 
   # -----------------------------------------------------------------------
-  # PATIENT ADDRESS (current)
+  # PATIENT ADDRESS (current) -- address slot 1
+  # All PAT_ADDRESS_* fields populate the same Address entry (address(1)).
   # -----------------------------------------------------------------------
 
   - column: PAT_ADDRESS_STREET1
     resource: Patient
-    path: address.line
+    path: address(1).line
     type: string
 
   - column: PAT_ADDRESS_STREET2
     resource: Patient
-    path: address.line
+    path: address(1).line
     type: string
 
   - column: PAT_ADDRESS_CITY
     resource: Patient
-    path: address.city
+    path: address(1).city
     type: string
 
   - column: PAT_ADDRESS_STATE
     resource: Patient
-    path: address.state
+    path: address(1).state
     type: string
 
   - column: PAT_ADDRESS_ZIP
     resource: Patient
-    path: address.postalCode
+    path: address(1).postalCode
     type: string
 
   - column: PAT_COUNTY_CODE
     resource: Patient
-    path: address.district
+    path: address(1).district
     type: string
 
   # -----------------------------------------------------------------------
-  # PATIENT ADDRESS (at time of vaccination)
+  # PATIENT ADDRESS (at time of vaccination) -- address slot 2
   # Databricks builds this via the ADDRESS_ATO_VAX subquery (closest address
-  # record to the vaccination date). Mapped with path prefix address.historical.*
-  # so SqlPatientRowMapper.accumulateAtoAddresses() processes them separately
-  # from the current address. Addresses are accumulated in reverse VACC_DATE
-  # order (newest vaccination first) and added as Patient.address with use=old.
-  # Consecutive duplicate addresses are collapsed.
+  # record to the vaccination date). No use code is assigned; slot order
+  # (address(2) after address(1)) conveys the at-time-of-vaccination
+  # relationship to DOH consumers. Because the source CSV is denormalized
+  # (one row per vaccination event), a patient may produce multiple address(2)
+  # entries across rows; consecutive duplicate addresses are collapsed by the
+  # mapper after all rows for a patient are processed.
   #
   # NOTE: The ADDRESS_ATO_VAX subquery in the Databricks notebook contains a
   # JOIN mismatch: contraindication and deferral UNION branches build their
@@ -167,41 +208,47 @@ mappings:
 
   - column: ATO_PAT_ADDRESS_STREET1
     resource: Patient
-    path: address.historical.line
+    path: address(2).line
     type: string
 
   - column: ATO_PAT_ADDRESS_STREET2
     resource: Patient
-    path: address.historical.line
+    path: address(2).line
     type: string
 
   - column: ATO_PAT_ADDRESS_CITY
     resource: Patient
-    path: address.historical.city
+    path: address(2).city
     type: string
 
   - column: ATO_PAT_ADDRESS_STATE
     resource: Patient
-    path: address.historical.state
+    path: address(2).state
     type: string
 
   - column: ATO_PAT_ADDRESS_ZIP
     resource: Patient
-    path: address.historical.postalCode
+    path: address(2).postalCode
     type: string
 
   - column: ATO_PAT_COUNTY_CODE
     resource: Patient
-    path: address.historical.district
+    path: address(2).district
     type: string
 
   # -----------------------------------------------------------------------
-  # PATIENT ETHNICITY -- DEFERRED, needs WA DOH confirmation
-  # Databricks passes pat_ethnicity_code through unchanged (CAST AS string).
-  # We do not know whether the WAIIS values are OMB codes or internal integers.
-  # Confirm with WA DOH before enabling.
+  # PATIENT ETHNICITY
+  # US Core ethnicity extension. value: expression appends an ombCategory
+  # sub-extension with a valueCoding from the CDCREC code system.
+  # Concept map pending WA DOH confirmation of whether values are OMB codes
+  # (e.g., "2135-2") or internal WAIIS integers.
   # -----------------------------------------------------------------------
-  # PAT_ETHNICITY_CODE -- deferred
+
+  - column: PAT_ETHNICITY_CODE
+    resource: Patient
+    path: "extension('http://hl7.org/fhir/us/core/StructureDefinition/us-core-ethnicity').extension('ombCategory').valueCoding"
+    value: "Coding{system: 'urn:oid:2.16.840.1.113883.6.238', code: $value}"
+    # TODO: add concept_map once WA DOH confirms ethnicity code values
 
   # -----------------------------------------------------------------------
   # PATIENT RACE  (PAT_RACE1-6)
@@ -212,16 +259,14 @@ mappings:
   # left unmapped. Code 9 and ELSE (RecipientRace1) map to 'UNK' and are
   # silently skipped (no ombCategory sub-extension for unknown race).
   # Both slots 6 and 8 map to '2131-1' (Other Race).
-  # All six columns use the same concept_map; they accumulate into a single
-  # US Core race extension (http://hl7.org/fhir/us/core/StructureDefinition/
-  # us-core-race) as ombCategory sub-extensions.
-  # System: urn:oid:2.16.840.1.113883.6.238 (CDCREC)
+  # All six columns accumulate ombCategory sub-extensions into the single
+  # US Core race extension. CDCREC system: urn:oid:2.16.840.1.113883.6.238
   # -----------------------------------------------------------------------
 
   - column: PAT_RACE1
     resource: Patient
-    path: extension.race
-    type: code
+    path: "extension('http://hl7.org/fhir/us/core/StructureDefinition/us-core-race').extension('ombCategory').valueCoding"
+    value: "Coding{system: 'urn:oid:2.16.840.1.113883.6.238', code: $value}"
     concept_map:
       - from: "1"
         to: "2106-3"
@@ -242,8 +287,8 @@ mappings:
 
   - column: PAT_RACE2
     resource: Patient
-    path: extension.race
-    type: code
+    path: "extension('http://hl7.org/fhir/us/core/StructureDefinition/us-core-race').extension('ombCategory').valueCoding"
+    value: "Coding{system: 'urn:oid:2.16.840.1.113883.6.238', code: $value}"
     concept_map:
       - from: "1"
         to: "2106-3"
@@ -264,8 +309,8 @@ mappings:
 
   - column: PAT_RACE3
     resource: Patient
-    path: extension.race
-    type: code
+    path: "extension('http://hl7.org/fhir/us/core/StructureDefinition/us-core-race').extension('ombCategory').valueCoding"
+    value: "Coding{system: 'urn:oid:2.16.840.1.113883.6.238', code: $value}"
     concept_map:
       - from: "1"
         to: "2106-3"
@@ -286,8 +331,8 @@ mappings:
 
   - column: PAT_RACE4
     resource: Patient
-    path: extension.race
-    type: code
+    path: "extension('http://hl7.org/fhir/us/core/StructureDefinition/us-core-race').extension('ombCategory').valueCoding"
+    value: "Coding{system: 'urn:oid:2.16.840.1.113883.6.238', code: $value}"
     concept_map:
       - from: "1"
         to: "2106-3"
@@ -308,8 +353,8 @@ mappings:
 
   - column: PAT_RACE5
     resource: Patient
-    path: extension.race
-    type: code
+    path: "extension('http://hl7.org/fhir/us/core/StructureDefinition/us-core-race').extension('ombCategory').valueCoding"
+    value: "Coding{system: 'urn:oid:2.16.840.1.113883.6.238', code: $value}"
     concept_map:
       - from: "1"
         to: "2106-3"
@@ -330,8 +375,8 @@ mappings:
 
   - column: PAT_RACE6
     resource: Patient
-    path: extension.race
-    type: code
+    path: "extension('http://hl7.org/fhir/us/core/StructureDefinition/us-core-race').extension('ombCategory').valueCoding"
+    value: "Coding{system: 'urn:oid:2.16.840.1.113883.6.238', code: $value}"
     concept_map:
       - from: "1"
         to: "2106-3"
@@ -370,23 +415,23 @@ mappings:
 
   # -----------------------------------------------------------------------
   # VACCINE PRODUCT
-  # NOTE: BEST_CDC_CODE is CAST AS DOUBLE -- CSV value will be "208.0" not "208".
+  # vaccineCode is a CodeableConcept; each column contributes one Coding to
+  # vaccineCode.coding. value: constructs the Coding with the correct system.
+  # NOTE: BEST_CDC_CODE and Asiis_Vacc_Code are CAST AS DOUBLE in the view --
+  #   CSV values will be float strings ("208.0"). stripDoubleZero() normalizes.
   # NOTE: Asiis_Vacc_Code uses mixed case in the live dictionary.
   # -----------------------------------------------------------------------
 
   - column: BEST_CDC_CODE
     resource: Immunization
-    path: vaccineCode.cvx
-    type: code
-    system: "http://hl7.org/fhir/sid/cvx"
+    path: vaccineCode.coding
+    value: "Coding{system: 'http://hl7.org/fhir/sid/cvx', code: $value}"
 
   # Column name is "Asiis_Vacc_Code" (mixed case) per 2026-05-27 dictionary.
-  # CAST AS DOUBLE -- will be a float string in CSV exports.
   - column: Asiis_Vacc_Code
     resource: Immunization
-    path: vaccineCode
-    type: code
-    system: "https://doh.wa.gov/NamingSystem/Asiis_Vacc_Code"
+    path: vaccineCode.coding
+    value: "Coding{system: 'https://doh.wa.gov/NamingSystem/Asiis_Vacc_Code', code: $value}"
 
   # FAMILY_CODE: ImmuCast (STC) internal vaccine family grouping code.
   # Codes are integers (1-24, with gaps) mapped to ACIP vaccine families:
@@ -401,22 +446,20 @@ mappings:
   # registered OID; WA DOH may assign a local WAIIS OID for this code system.
   - column: FAMILY_CODE
     resource: Immunization
-    path: vaccineCode
-    type: code
-    # Vaccine Family Codes table in ImmuCast 5.18.1 docs (see "Vaccine Family Codes" section)
-    system: "https://documentation.stchome.com/assets/prodfiles/ImmuCast/5_18_1/html/vacc_codes.htm"
+    path: vaccineCode.coding
+    value: "Coding{system: 'https://documentation.stchome.com/assets/prodfiles/ImmuCast/5_18_1/html/vacc_codes.htm', code: $value}"
 
   - column: NDC_CODE
     resource: Immunization
-    path: vaccineCode.ndc
-    type: code
-    system: "http://hl7.org/fhir/sid/ndc"
+    path: vaccineCode.coding
+    value: "Coding{system: 'http://hl7.org/fhir/sid/ndc', code: $value}"
 
+  # manufacturer is a Reference(Organization); the MVX code is carried as a
+  # logical identifier so no Organization resource needs to be created inline.
   - column: MANU_CODE
     resource: Immunization
     path: manufacturer
-    type: code
-    system: "http://terminology.hl7.org/CodeSystem/mvx"
+    value: "Reference{identifier: Identifier{system: 'http://terminology.hl7.org/CodeSystem/mvx', value: $value}}"
 
   - column: LOT_NUM
     resource: Immunization
@@ -435,6 +478,7 @@ mappings:
   # WA DOH exports include them; ignored if the column is not present.
   # View transforms: ANATOMICAL_SITE -> HL7 v2 body site codes (LT, LA, etc.)
   #                  ANATOMICAL_ROUTE -> NCI C-codes (C28161 etc.)
+  # Both site and route are CodeableConcept; value: constructs a single Coding.
   # -----------------------------------------------------------------------
 
   - column: VACC_DATE
@@ -445,26 +489,27 @@ mappings:
   - column: ANATOMICAL_SITE
     resource: Immunization
     path: site
-    type: code
-    system: "http://terminology.hl7.org/CodeSystem/v2-0163"
+    value: "CodeableConcept{coding: Coding{system: 'http://terminology.hl7.org/CodeSystem/v2-0163', code: $value}}"
 
   - column: ANATOMICAL_ROUTE
     resource: Immunization
     path: route
-    type: code
-    system: "http://ncimeta.nci.nih.gov"
+    value: "CodeableConcept{coding: Coding{system: 'http://ncimeta.nci.nih.gov', code: $value}}"
 
   # CC_VOLUME: present in the notebook SELECT but absent from the 2026-05-27 dictionary.
+  # doseQuantity is a SimpleQuantity; unit assumed mL (CC = cubic centimeter = mL).
+  # Confirm unit with WA DOH if this column appears in exports.
   - column: CC_VOLUME
     resource: Immunization
     path: doseQuantity
-    type: decimal
+    value: "Quantity{value: $value, unit: 'mL', system: 'http://unitsofmeasure.org', code: 'mL'}"
 
   # DOSE_NUMBER: view CASE outputs actual dose number string, 'INV' (invalid),
-  # or 'UNK' (unknown).  Passed through as-is.
+  # or 'UNK' (unknown). Mapped to doseNumberString (the string variant of the
+  # choice type protocolApplied.doseNumber[x]).
   - column: DOSE_NUMBER
     resource: Immunization
-    path: protocolApplied.doseNumber
+    path: protocolApplied.doseNumberString
     type: string
 
   # SERIES_COMPLETE: view CASE outputs 'YES', 'NO', or 'UNK'.
@@ -488,19 +533,21 @@ mappings:
       - from: "Y"
         to: "false"
 
+  # reportOrigin is a CodeableConcept. REPORTING_METHOD values are passed through
+  # from WAIIS unchanged; no code system is documented. Represented as text until
+  # WA DOH confirms whether a coded system applies.
   - column: REPORTING_METHOD
     resource: Immunization
     path: reportOrigin
-    type: string
+    value: "CodeableConcept{text: $value}"
 
   # VFC_ELIGIBLE: CAST AS DOUBLE in the view -- CSV value is "1.0" or "0.0".
   # stripDoubleZero normalizes to "1" or "0" before concept_map lookup.
-  # Mapped to fundingSource using HL7 immunization-funding-source codes.
-  # "1" = VFC-eligible (publicly funded program); "0" = not VFC-eligible (private).
+  # fundingSource is a CodeableConcept using HL7 immunization-funding-source codes.
   - column: VFC_ELIGIBLE
     resource: Immunization
     path: fundingSource
-    type: string
+    value: "CodeableConcept{coding: Coding{system: 'http://terminology.hl7.org/CodeSystem/immunization-funding-source', code: $value}}"
     concept_map:
       - from: "1"
         to: "public"
@@ -529,6 +576,7 @@ mappings:
   # support. Included for documentation completeness; deferred to future work.
   # PROVIDER_FACILITY_TYPE: view CASE outputs HL7 v2 table 0442 numeric codes
   # (e.g., '9'=Hospital, '12'=Private Practice, '19'=Public Health Dept).
+  # type is a CodeableConcept; value: constructs a single Coding.
   # -----------------------------------------------------------------------
 
   - column: ORG_NAME
@@ -562,8 +610,7 @@ mappings:
   - column: PROVIDER_FACILITY_TYPE
     resource: Location
     path: type
-    type: code
-    system: "http://terminology.hl7.org/CodeSystem/v2-0442"
+    value: "CodeableConcept{coding: Coding{system: 'http://terminology.hl7.org/CodeSystem/v2-0442', code: $value}}"
 
   - column: FAC_ADDRESS_STREET1
     resource: Location
