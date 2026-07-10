@@ -43,16 +43,16 @@ sql:
       # maps hub column names to FHIR Patient and Immunization elements.
       mapping-config-path: classpath:sql-mapping.yml
 
-    # "test" serves a single all_vax_event CSV mounted at /data inside the container.
-    # Override the file path and mapping via environment variables without image rebuild.
+    # "test" serves a single all_vax_event CSV. Defaults to the AIRA RSP fixture bundled
+    # in the JAR. Override with a real extract mounted at /data to use live WA DOH data.
     # Use /sql/fhir/test/Patient?family=FagenAIRA&birthdate=1963-12-26 to exercise it.
     test:
       type: CSV
 
-      # Path to the denormalized all_vax_event CSV inside the container.
+      # Path to the denormalized all_vax_event CSV.
       # Each row is one vaccination event; patient demographics repeat per row.
       # Override: SQL_BACKENDS_TEST_DATA_PATH=/data/my_extract.csv
-      data-path: ${SQL_BACKENDS_TEST_DATA_PATH:/data/all_vax_event.csv}
+      data-path: ${SQL_BACKENDS_TEST_DATA_PATH:classpath:sql-dev/all_vax_event.csv}
 
       # Column-to-FHIR mapping for the all_vax_event CSV.
       # The built-in sql-mapping-wadoh.yml targets WA DOH all_vax_event column names.
