@@ -1,0 +1,2 @@
+org.springframework.boot.env.EnvironmentPostProcessor=\
+  gov.cdc.izgateway.xform.sql.SqlProfileActivator
